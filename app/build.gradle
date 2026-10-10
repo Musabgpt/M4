@@ -27,7 +27,7 @@ android {
         // NewAl-Cloud last compatible release build used versionCode 363.
         // GitHub M4_BUILD_NUMBER monotonically advances across releases.
         versionCode (10000 + ((System.getenv('M4_BUILD_NUMBER') ?: '0') as Integer))
-        versionName '2.0.0'
+        versionName '2.1.0'
         externalNativeBuild { cmake { cFlags '-std=c11' } }
     }
     externalNativeBuild {

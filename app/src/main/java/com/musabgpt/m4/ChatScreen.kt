@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -92,6 +93,7 @@ private fun greeting(): String {
 @Composable
 fun ChatScreen(
     openTerminal: () -> Unit,
+    connectGithub: () -> Unit,
     runAgent: (String) -> Unit,
     readAgentProgress: () -> AgentProgress?,
     vm: ChatViewModel = viewModel()
@@ -102,6 +104,7 @@ fun ChatScreen(
     val providers by vm.providers.collectAsState()
     val providerIndex by vm.providerIndex.collectAsState()
     val activeRoute by vm.activeRoute.collectAsState()
+    val approval by vm.approval.collectAsState()
     val provider = providers[providerIndex.coerceIn(providers.indices)]
     val current = conversations.firstOrNull { it.id == currentId } ?: conversations.first()
 
@@ -115,6 +118,32 @@ fun ChatScreen(
     var agentProgress by remember { mutableStateOf<AgentProgress?>(null) }
 
 
+    if (approval != null) {
+        val pending=approval!!
+        AlertDialog(
+            onDismissRequest = { vm.decideTool(false) },
+            title = { Text("موافقة على أمر الطرفية العربية") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Text("النموذج يطلب تشغيل أمر حقيقي في Alpine داخل التطبيق. وافق فقط إذا تعرف ما يفعله.")
+                    Surface(
+                        color = colors.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(pending.command.take(2000), fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(12.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.decideTool(true) }) { Text("السماح لهذا الأمر") }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.decideTool(false) }) { Text("رفض") }
+            }
+        )
+    }
     if (showAgentConfirm) {
         AlertDialog(
             onDismissRequest = { showAgentConfirm = false },
@@ -209,6 +238,14 @@ fun ChatScreen(
                     Icon(Icons.Filled.Terminal, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("الطرفية العربية المدمجة")
+                }
+                TextButton(onClick = {
+                    scope.launch { drawerState.close() }
+                    connectGithub()
+                }, modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
+                    Icon(Icons.Filled.Link, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("ربط GitHub رسمياً")
                 }
             }
         }

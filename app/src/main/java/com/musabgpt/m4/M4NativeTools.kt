@@ -23,7 +23,7 @@ import org.json.JSONObject
 class M4NativeTools(private val app: Application) {
     companion object {
         private val terminalOnlySuffix = Regex(
-            """\\s+(?:باستخدام|عبر|عن طريق|من خلال|بواسطة)\\s+(?:الطرفية|الترمينال|طرفيتك|terminal)\\s*[.!؟]*$""",
+            """\s+(?:باستخدام|عبر|عن طريق|من خلال|بواسطة)\s+(?:الطرفية|الترمينال|طرفيتك|terminal)\s*[.!؟]*$""",
             RegexOption.IGNORE_CASE
         )
 

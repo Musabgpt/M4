@@ -31,7 +31,7 @@ public final class ArabicCommandRouter {
     private static Parsed argument(Kind kind,String arg){return new Parsed(kind,arg,arg);}
     private static Parsed shell(String cmd){return new Parsed(Kind.SHELL,cmd,cmd);}
     static String quote(String value){return "'"+value.replace("'","'\\''")+"'";}
-    static String normalize(String s){
+    public static String normalize(String s){
         return s.replaceAll("[\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]","")
             .replace('أ','ا').replace('إ','ا').replace('آ','ا')
             .replace('ى','ي').replace('ـ',' ').toLowerCase(Locale.ROOT).trim()
