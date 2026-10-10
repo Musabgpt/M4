@@ -19,6 +19,9 @@ class M4ChatActivity : ComponentActivity() {
                     runAgent = { goal ->
                         startActivity(Intent(this, MainActivity::class.java)
                             .putExtra(MainActivity.EXTRA_AGENT_GOAL, goal))
+                    },
+                    readAgentProgress = {
+                        AgentProgressStore.read(this)
                     }
                 )
             }

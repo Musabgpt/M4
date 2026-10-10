@@ -10,6 +10,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
@@ -44,6 +45,7 @@ fun ChatTheme(content: @Composable () -> Unit) {
 fun ChatScreen(
     openTerminal: () -> Unit,
     runAgent: (String) -> Unit,
+    readAgentProgress: () -> AgentProgress?,
     vm: ChatViewModel = viewModel()
 ) {
     val conversations by vm.conversations.collectAsState()
@@ -58,6 +60,8 @@ fun ChatScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var editProvider by remember { mutableStateOf(false) }
     var showAgentConfirm by remember { mutableStateOf(false) }
+    var showAgentProgress by remember { mutableStateOf(false) }
+    var agentProgress by remember { mutableStateOf<AgentProgress?>(null) }
     var endpoint by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
@@ -112,6 +116,43 @@ fun ChatScreen(
             }) { Text("تشغيل") }
         },
         dismissButton = { TextButton(onClick = { showAgentConfirm = false }) { Text("إلغاء") } }
+    )
+
+    if (showAgentProgress) AlertDialog(
+        onDismissRequest = { showAgentProgress = false },
+        title = { Text("حالة وكيل البرمجة") },
+        text = {
+            val p = agentProgress
+            if (p == null) {
+                Text("لا توجد مهمة محفوظة بعد. ابدأ مهمة عبر «تنفيذ كود».")
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(p.displayPhase, style = MaterialTheme.typography.titleMedium)
+                    Text("الخطوات المسجلة: " + p.steps)
+                    if (p.goal.isNotBlank()) Text("الهدف: " + p.goal)
+                    if (p.summary.isNotBlank()) Text("النتيجة: " + p.summary)
+                    Text("حالة محفوظة محلياً. اختبار بناء APK يتم في GitHub Actions.",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = { agentProgress = readAgentProgress() }) {
+                    Text("تحديث")
+                }
+                if (agentProgress?.canResume == true) {
+                    TextButton(onClick = {
+                        val goal = agentProgress?.goal.orEmpty()
+                        showAgentProgress = false
+                        if (goal.isNotBlank()) runAgent(goal)
+                    }) { Text("استئناف") }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { showAgentProgress = false }) { Text("إغلاق") }
+        }
     )
 
     ModalNavigationDrawer(
@@ -187,6 +228,12 @@ fun ChatScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = {
+                            agentProgress = readAgentProgress()
+                            showAgentProgress = true
+                        }) {
+                            Icon(Icons.Filled.Info, contentDescription = "حالة الوكيل")
+                        }
                         IconButton(onClick = openTerminal) {
                             Icon(Icons.Filled.Terminal, contentDescription = "الطرفية")
                         }
