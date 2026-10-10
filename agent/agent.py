@@ -186,6 +186,10 @@ def ask(url,model,messages):
                 reply=json.load(response)["choices"][0]["message"]
                 if not isinstance(reply,dict):
                     raise ValueError("Invalid model reply")
+                # Coding requires a tool-capable route. A text-only reply cannot
+                # accomplish a file edit and must not stop gateway failover.
+                if not isinstance(reply.get("tool_calls"),list) or not reply["tool_calls"]:
+                    raise ValueError("Provider did not return a coding tool call")
                 return reply
         except (OSError,KeyError,ValueError,IndexError,TypeError) as error:
             errors.append(route.name+": "+str(error)[:110])
