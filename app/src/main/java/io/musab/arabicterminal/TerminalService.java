@@ -39,6 +39,10 @@ public final class TerminalService extends Service {
     private Runnable listener;
     private Session selected;
     private int sequence=1;
+    /** Private reusable PTY for tools invoked from chat. Isolated from typed user commands. */
+    private final Object toolLock=new Object();
+    private Session agentSession;
+
     public final class LocalBinder extends Binder {
         public TerminalService getService(){return TerminalService.this;}
     }
@@ -134,7 +138,76 @@ public final class TerminalService extends Service {
         new Thread(()->readLoop(session),"arabic-pty-read-"+session.name).start();
         return session;
     }
+    /**
+     * Run an explicitly authorized command in the SAME Alpine/PRoot PTY engine
+     * used by the Arabic Terminal UI. Results are written inside app-private
+     * rootfs paths, not guessed from terminal screenshots or model output.
+     * Never call on Android's main thread.
+     */
+    public String runAgentCommand(String command,int timeoutSeconds)
+            throws IOException,InterruptedException {
+        if(android.os.Looper.myLooper()==android.os.Looper.getMainLooper())
+            throw new IOException("Terminal tool must run on a worker thread");
+        if(command==null || command.isEmpty() || command.length()>4000 ||
+                command.indexOf('\u0000')>=0)
+            throw new IOException("Invalid terminal command");
+        int seconds=Math.max(2,Math.min(60,timeoutSeconds));
+        synchronized(toolLock){
+            try { LinuxEnvironment.install(this); }
+            catch(Exception error) {
+                throw new IOException("Unable to prepare verified Alpine runtime",error);
+            }
+            if(agentSession==null || agentSession.finished || !sessions.contains(agentSession)){
+                Session previous=selected;
+                agentSession=create(false,true,24,90);
+                if(previous!=null && sessions.contains(previous))select(previous);
+            }
+            java.io.File guestRoot=new java.io.File(LinuxEnvironment.rootfs(this),"root/.m4-chat-tools");
+            if(!guestRoot.exists() && !guestRoot.mkdirs())
+                throw new IOException("Cannot create private terminal result folder");
+            java.lang.String nonce=java.util.UUID.randomUUID().toString().replace("-","");
+            java.io.File result=new java.io.File(guestRoot,nonce+".out");
+            java.io.File done=new java.io.File(guestRoot,nonce+".exit");
+            String path="/root/.m4-chat-tools/"+nonce;
+            String statement="sh -c "+shellQuote(command)+
+                " > "+shellQuote(path+".out")+" 2>&1; "+
+                "_m4_exit=$?; printf '%s' \"$_m4_exit\" > "+shellQuote(path+".exit")+"\n";
+            write(agentSession,statement);
+            long until=android.os.SystemClock.elapsedRealtime()+seconds*1000L;
+            try{
+                while(!done.isFile()){
+                    if(Thread.currentThread().isInterrupted())throw new InterruptedException();
+                    if(agentSession.finished)throw new IOException("Arabic Terminal PTY closed");
+                    if(android.os.SystemClock.elapsedRealtime()>until){
+                        write(agentSession,"\u0003");
+                        return "انتهت مهلة الأمر بعد "+seconds+" ثانية. لم يتم التأكد من اكتماله.";
+                    }
+                    Thread.sleep(100);
+                }
+                String code=new String(java.nio.file.Files.readAllBytes(done.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8).trim();
+                String output="";
+                if(result.isFile()){
+                    // Read at most 24KiB; never flood the phone UI or model context.
+                    try(java.io.InputStream in=new java.io.FileInputStream(result)){
+                        byte[] bytes=new byte[24576];
+                        int len=in.read(bytes);
+                        if(len>0)output=new String(bytes,0,len,java.nio.charset.StandardCharsets.UTF_8);
+                    }
+                }
+                return "exit_code="+code+"\n"+output;
+            }finally{
+                java.nio.file.Files.deleteIfExists(done.toPath());
+                java.nio.file.Files.deleteIfExists(result.toPath());
+            }
+        }
+    }
+    private static String shellQuote(String value){
+        return "'"+value.replace("'","'\\''")+"'";
+    }
+
     public void close(Session session){
+        if(session==agentSession)agentSession=null;
         if(session==null || !sessions.remove(session))return;
         synchronized(session.mutex){
             if(!session.finished)NativePty.terminate(session.handle);

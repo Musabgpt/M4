@@ -56,7 +56,9 @@ import java.util.Locale;
 /** واجهة الطرفية العربية: جلسات PTY متعددة، شاشة ألوان، وأوامر تعمل محليًا. */
 public final class MainActivity extends Activity {
     public static final String EXTRA_AGENT_GOAL = "com.musabgpt.m4.AGENT_GOAL";
+    public static final String EXTRA_GITHUB_LOGIN = "com.musabgpt.m4.GITHUB_LOGIN";
     private String pendingAgentGoal;
+    private boolean pendingGithubLogin;
     private static final int BG=0xFF0B1422, PANEL=0xFF1C2A3C,
             ACCENT=0xFF54DCAD, FG=0xFFECF3FC, MUTED=0xFFB1C3D5;
     private static final int FILE_PICKER=2026, EXPORT_PICKER=2027, RESTORE_PICKER=2028, MAX_SESSIONS=6;
@@ -74,6 +76,12 @@ public final class MainActivity extends Activity {
             if(sessions.isEmpty())prepareLinux();
             else {
                 render();
+                if(pendingGithubLogin){
+                    useLinux=true;
+                    // Interactive OAuth must NOT hijack the model's private PTY.
+                    createSession(false);
+                    launchGithubLogin();
+                }
                 if(pendingAgentGoal!=null){
                     useLinux=true;
                     createSession(false);
@@ -99,12 +107,25 @@ public final class MainActivity extends Activity {
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         pendingAgentGoal=getIntent()==null?null:getIntent().getStringExtra(EXTRA_AGENT_GOAL);
+        pendingGithubLogin=getIntent()!=null && getIntent().getBooleanExtra(EXTRA_GITHUB_LOGIN,false);
         buildUi();
     }
     @Override protected void onNewIntent(Intent intent){
         super.onNewIntent(intent);
         setIntent(intent);
         String goal=intent==null?null:intent.getStringExtra(EXTRA_AGENT_GOAL);
+        if(intent!=null && intent.getBooleanExtra(EXTRA_GITHUB_LOGIN,false)){
+            pendingGithubLogin=true;
+            if(service!=null){
+                useLinux=true;
+                if(LinuxEnvironment.installed(this)){
+                    createSession(false);
+                    launchGithubLogin();
+                } else if(!preparingLinux){
+                    prepareLinux();
+                }
+            }
+        }
         if(goal!=null){
             pendingAgentGoal=goal;
             if(service!=null && LinuxEnvironment.installed(this)){
@@ -317,6 +338,15 @@ public final class MainActivity extends Activity {
             notice("تعذّر تشغيل الوكيل: "+error.getMessage());
         }
     }
+    private void launchGithubLogin(){
+        if(!pendingGithubLogin || service==null || active==null || !active.linux)return;
+        pendingGithubLogin=false;
+        // Official GitHub CLI OAuth device/browser flow. Never embed a token or
+        // print an OAuth credential in chat: let the user complete this terminal UI.
+        write(active,"gh auth login --hostname github.com --git-protocol https --web\n");
+        notice("ربط GitHub: اتبع رمز التحقق وتعليمات gh في الطرفية. "+
+               "يمكنك فحص الربط لاحقاً بالأمر gh auth status.");
+    }
     private void prepareLinux(){
         if(service==null||preparingLinux)return;
         preparingLinux=true;
@@ -340,6 +370,7 @@ public final class MainActivity extends Activity {
                     createSession(false);
                     notice("Alpine Linux: اكتب cat /etc/os-release أو apk --version");
                     launchAgentGoal();
+                    launchGithubLogin();
                 }
             });
         },"linux-offline-installer").start();

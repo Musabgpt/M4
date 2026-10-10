@@ -16,6 +16,10 @@ class M4ChatActivity : ComponentActivity() {
                     openTerminal = {
                         startActivity(Intent(this, MainActivity::class.java))
                     },
+                    connectGithub = {
+                        startActivity(Intent(this, MainActivity::class.java)
+                            .putExtra(MainActivity.EXTRA_GITHUB_LOGIN,true))
+                    },
                     runAgent = { goal ->
                         startActivity(Intent(this, MainActivity::class.java)
                             .putExtra(MainActivity.EXTRA_AGENT_GOAL, goal))

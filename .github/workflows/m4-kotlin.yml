@@ -1,8 +1,6 @@
 name: M4 — Kotlin Compose Compile
 on:
   pull_request:
-  push:
-    branches: [main, feat/compose-newal-term]
   workflow_dispatch:
 permissions:
   contents: read
