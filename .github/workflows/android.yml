@@ -47,6 +47,8 @@ jobs:
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/term-agent/agent.py'
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/term-agent-watch'
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/m4-agent-start'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/m4-seed/app/src/main/java/com/musabgpt/m4/ChatScreen.kt'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/m4-seed/.git/HEAD'
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/pytest'
       - name: تثبيت Gradle
         uses: gradle/actions/setup-gradle@v4

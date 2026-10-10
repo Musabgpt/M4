@@ -49,6 +49,19 @@ class M4LauncherTests(unittest.TestCase):
         self.assertIn("run Add tests & fix bug --steps 40 --allow-exec", commands)
         self.assertTrue((self.project / ".git").exists())
 
+    def test_offline_seed_creates_editable_checkout(self):
+        seed = Path(self.temp.name) / "seed"
+        (seed / ".git").mkdir(parents=True)
+        (seed / "agent").mkdir()
+        (seed / "agent_tests").mkdir()
+        (seed / "agent" / "agent.py").write_text("# bundled agent\n")
+        self.env["M4_AGENT_SEED"] = str(seed)
+        result = self.invoke("Fix a bug offline")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.project / ".git").is_dir())
+        self.assertIn("offline M4 project", result.stdout)
+        self.assertIn("run Fix a bug offline", self.log.read_text())
+
     def test_non_checkout_never_overwritten(self):
         self.project.mkdir(parents=True)
         important = self.project / "important.txt"

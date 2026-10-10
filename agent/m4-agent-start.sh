@@ -11,6 +11,7 @@ fi
 project="${M4_AGENT_PROJECT:-/root/projects/M4}"
 provider="${M4_AGENT_PROVIDER_FILE:-/root/.m4-agent/provider.env}"
 source_repo="https://github.com/Musabgpt/M4.git"
+seed="${M4_AGENT_SEED:-/opt/m4-seed}"
 if [ ! -f "$provider" ]; then
   echo "Missing private provider settings; configure the model in the M4 chat UI." >&2
   exit 3
@@ -23,12 +24,17 @@ elif [ -e "$project" ]; then
   echo "Move it aside manually or select a different project directory." >&2
   exit 4
 else
-  echo "Cloning M4 source: $source_repo"
   mkdir -p "$(dirname "$project")"
-  git clone --depth=1 "$source_repo" "$project" || {
-    echo "Unable to clone M4. Check the network or GitHub access." >&2
-    exit 5
-  }
+  if [ -d "$seed/.git" ] && [ -f "$seed/agent/agent.py" ] && [ -d "$seed/agent_tests" ]; then
+    echo "Creating offline M4 project from verified APK source snapshot"
+    cp -a "$seed" "$project"
+  else
+    echo "Cloning M4 source: $source_repo"
+    git clone --depth=1 "$source_repo" "$project" || {
+      echo "Unable to clone M4. Check the network or GitHub access." >&2
+      exit 5
+    }
+  fi
 fi
 cd "$project"
 if [ ! -f "agent/agent.py" ] || [ ! -d "agent_tests" ]; then
