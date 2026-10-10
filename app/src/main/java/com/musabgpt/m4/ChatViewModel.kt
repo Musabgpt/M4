@@ -186,7 +186,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             }
                         } else false
                         if(call.name=="github_connect" &&
-                           clean.contains("github",ignoreCase=true)) {
+                           (clean.contains("github",ignoreCase=true) ||
+                            clean.contains("جيت هاب") || clean.contains("غيتهاب"))) {
                             launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
                             "فُتحت طرفية GitHub داخل شاشة المحادثة؛ أكمل التفويض محلياً."
                         } else nativeTools.execute(call.name,call.arguments,clean,approved) { chunk ->
