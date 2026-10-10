@@ -16,6 +16,7 @@ import java.util.UUID
 
 /** Visible user approval is mandatory for arbitrary model-issued shell commands. */
 data class ToolApproval(val command: String, val decision: CompletableDeferred<Boolean>)
+data class TerminalLaunch(val id: String = UUID.randomUUID().toString(), val command: String?)
 
 data class UiMessage(
     val id: String = UUID.randomUUID().toString(),
@@ -59,10 +60,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
     private val _approval=MutableStateFlow<ToolApproval?>(null)
     val approval=_approval.asStateFlow()
+    private val _terminalLaunch=MutableStateFlow<TerminalLaunch?>(null)
+    val terminalLaunch=_terminalLaunch.asStateFlow()
+    private var taskApprovedCommands=0
+    fun launchTerminal(command: String? = null) { _terminalLaunch.value=TerminalLaunch(command=command) }
+    fun consumeTerminalLaunch(id: String) {
+        if(_terminalLaunch.value?.id==id) _terminalLaunch.value=null
+    }
     val selected: Provider get() = _providers.value[_providerIndex.value]
 
-    fun decideTool(approved: Boolean) {
+    fun decideTool(approved: Boolean, approveTask: Boolean = false) {
         val pending=_approval.value ?: return
+        if(approved && approveTask) taskApprovedCommands=11 // first + up to 11 further calls
         if(!pending.decision.isCompleted)pending.decision.complete(approved)
         _approval.value=null
     }
@@ -116,7 +125,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun stop() {
         decideTool(false)
+        taskApprovedCommands=0
         ChatApi.stop()
+        nativeTools.cancelTerminalCommand()
         job?.cancel()
     }
 
@@ -136,6 +147,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         saveHistory()
         val conv = _conversations.value.first { it.id == convId }
         val history = conv.messages.dropLast(1).map { ChatMessage(it.role, it.content) }
+        taskApprovedCommands=0
         val primary=selected
         val quick=M4NativeTools.quickAction(clean)
         _activeRoute.value=if(quick!=null) "أدوات أندرويد المحلية" else "جاري الاتصال..."
@@ -154,18 +166,34 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             try {
                 if(quick!=null) {
-                    buffer.append(nativeTools.performQuick(quick))
+                    if(quick=="github_connect") {
+                        launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
+                        buffer.append("فتحت طرفية GitHub التفاعلية ضمن المحادثة؛ أكمل ربط حسابك هناك.")
+                    } else buffer.append(nativeTools.performQuick(quick))
                 } else {
                     ChatApi.stream(primary,history,prompt) { call ->
                         val shell=call.name=="terminal_command"
                         val approved=if(shell) {
-                            val command=call.arguments.optString("command","")
-                            val choice=CompletableDeferred<Boolean>()
-                            _approval.value=ToolApproval(command,choice)
-                            try { withTimeout(120000) { choice.await() } }
-                            finally { _approval.value=null }
+                            if(taskApprovedCommands>0) {
+                                taskApprovedCommands--
+                                true
+                            } else {
+                                val command=call.arguments.optString("command","")
+                                val choice=CompletableDeferred<Boolean>()
+                                _approval.value=ToolApproval(command,choice)
+                                try { withTimeout(120000) { choice.await() } }
+                                finally { _approval.value=null }
+                            }
                         } else false
-                        nativeTools.execute(call.name,call.arguments,clean,approved)
+                        if(call.name=="github_connect" &&
+                           clean.contains("github",ignoreCase=true)) {
+                            launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
+                            "فُتحت طرفية GitHub داخل شاشة المحادثة؛ أكمل التفويض محلياً."
+                        } else nativeTools.execute(call.name,call.arguments,clean,approved) { chunk ->
+                            // Genuine PTY stdout, captured while the command is running.
+                            val limited=chunk.takeLast(1500)
+                            if(limited.isNotBlank()) _activeRoute.value="الطرفية: "+limited.takeLast(80).replace("\n"," ")
+                        }
                     }.collect { event ->
                         when(event) {
                             is ChatEvent.Route -> _activeRoute.value="يعمل عبر: "+event.name
@@ -189,6 +217,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 buffer.append("تعذّرت المهمة: ").append((e.message ?: "فشل الاتصال").take(300))
             } finally {
                 flush()
+                taskApprovedCommands=0
                 _approval.value=null
                 _streaming.value=false
                 saveHistory()
