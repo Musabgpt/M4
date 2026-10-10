@@ -1,4 +1,7 @@
 name: Agent core smoke tests
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 on:
   pull_request:
   workflow_dispatch:
