@@ -115,25 +115,10 @@ fun ChatScreen(
     var showAgentConfirm by remember { mutableStateOf(false) }
     var showAgentProgress by remember { mutableStateOf(false) }
     var agentProgress by remember { mutableStateOf<AgentProgress?>(null) }
-    var showTerminal by remember { mutableStateOf(false) }
-    var terminalCommand by remember { mutableStateOf<String?>(null) }
-    val terminalLaunch by vm.terminalLaunch.collectAsState()
-    LaunchedEffect(terminalLaunch) {
-        val requested=terminalLaunch ?: return@LaunchedEffect
-        terminalCommand=requested.command
-        showTerminal=true
-        vm.consumeTerminalLaunch(requested.id)
-    }
+    val terminalMode by vm.terminalMode.collectAsState()
     fun launchTerminal(command: String? = null) {
-        terminalCommand=command
-        showTerminal=true
+        vm.launchTerminal(command)
     }
-    if (showTerminal) {
-        EmbeddedTerminalSheet(initialCommand=terminalCommand,
-            providerFamily=provider.id,
-            onDismiss={ showTerminal=false; terminalCommand=null })
-    }
-
 
     if (approval != null) {
         val pending=approval!!
@@ -316,7 +301,9 @@ fun ChatScreen(
                         }) {
                             Icon(Icons.Filled.Info, contentDescription = "حالة الوكيل")
                         }
-                        IconButton(onClick = { launchTerminal() }) {
+                        IconButton(onClick = {
+                            if (terminalMode) vm.leaveTerminal() else launchTerminal()
+                        }) {
                             Icon(Icons.Filled.Terminal, contentDescription = "الطرفية العربية")
                         }
                         IconButton(onClick = vm::newChat) {
@@ -327,6 +314,21 @@ fun ChatScreen(
             },
             bottomBar = {
                 Column {
+                    if (terminalMode) {
+                        Row(
+                            modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp),
+                            verticalAlignment=Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Filled.Terminal, contentDescription=null, tint=Clay,
+                                modifier=Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("المحادثة هي الطرفية • Alpine PTY مباشر",
+                                modifier=Modifier.weight(1f), fontSize=12.sp,
+                                color=colors.onSurfaceVariant)
+                            TextButton(onClick={ vm.terminalControl("\u0003") }) { Text("إيقاف الأمر") }
+                            TextButton(onClick={ vm.leaveTerminal() }) { Text("عودة للمساعد") }
+                        }
+                    }
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 15.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -369,6 +371,7 @@ fun ChatScreen(
                     InputBar(
                         text = input,
                         onTextChange = { input = it },
+                        hint = if (terminalMode) "اكتب أمر Alpine هنا مباشرة..." else "اكتب رسالتك...",
                         isStreaming = isStreaming,
                         onSend = {
                             vm.send(input)
@@ -562,6 +565,7 @@ private fun ThinkingDot() {
 private fun InputBar(
     text: String,
     onTextChange: (String) -> Unit,
+    hint: String,
     isStreaming: Boolean,
     onSend: () -> Unit,
     onStop: () -> Unit
@@ -596,7 +600,7 @@ private fun InputBar(
                     decorationBox = { inner ->
                         Box {
                             if (text.isEmpty()) {
-                                Text("اكتب رسالتك...", fontSize = 16.sp, color = colors.onSurfaceVariant)
+                                Text(hint, fontSize = 16.sp, color = colors.onSurfaceVariant)
                             }
                             inner()
                         }
