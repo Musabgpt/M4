@@ -165,6 +165,12 @@ public final class TerminalService extends Service {
      */
     public String runAgentCommand(String command,int timeoutSeconds)
             throws IOException,InterruptedException {
+        return runAgentCommand(command,timeoutSeconds,chunk->{});
+    }
+    /** Streams bounded stdout chunks from the real PTY command file as they arrive. */
+    public String runAgentCommand(String command,int timeoutSeconds,
+            java.util.function.Consumer<String> onOutput)
+            throws IOException,InterruptedException {
         if(android.os.Looper.myLooper()==android.os.Looper.getMainLooper())
             throw new IOException("Terminal tool must run on a worker thread");
         if(command==null || command.isEmpty() || command.length()>4000 ||
@@ -195,6 +201,8 @@ public final class TerminalService extends Service {
                 "_m4_exit=$?; printf '%s' \"$_m4_exit\" > "+shellQuote(path+".exit")+"\n";
             write(agentSession,statement);
             long until=android.os.SystemClock.elapsedRealtime()+seconds*1000L;
+            long alreadyRead=0L;
+            StringBuilder captured=new StringBuilder();
             try{
                 while(!done.isFile()){
                     if(Thread.currentThread().isInterrupted() || cancelAgentRequested){
@@ -206,20 +214,18 @@ public final class TerminalService extends Service {
                         aborted=true;
                         return "timeout=true\\nانتهت مهلة الأمر بعد "+seconds+" ثانية؛ أُلغي تنفيذ جلسة الأمر.";
                     }
+                    if(result.isFile() && alreadyRead<24576){
+                        long read=readAgentOutput(result,alreadyRead,captured,onOutput);
+                        alreadyRead+=read;
+                    }
                     Thread.sleep(100);
+                }
+                if(result.isFile() && alreadyRead<24576){
+                    alreadyRead+=readAgentOutput(result,alreadyRead,captured,onOutput);
                 }
                 String code=new String(java.nio.file.Files.readAllBytes(done.toPath()),
                     java.nio.charset.StandardCharsets.UTF_8).trim();
-                String output="";
-                if(result.isFile()){
-                    // Read at most 24KiB; never flood the phone UI or model context.
-                    try(java.io.InputStream in=new java.io.FileInputStream(result)){
-                        byte[] bytes=new byte[24576];
-                        int len=in.read(bytes);
-                        if(len>0)output=new String(bytes,0,len,java.nio.charset.StandardCharsets.UTF_8);
-                    }
-                }
-                return "exit_code="+code+"\n"+output;
+                return "exit_code="+code+"\n"+captured.toString();
             }finally{
                 if(aborted && agentSession!=null){
                     close(agentSession);
@@ -228,6 +234,21 @@ public final class TerminalService extends Service {
                 java.nio.file.Files.deleteIfExists(done.toPath());
                 java.nio.file.Files.deleteIfExists(result.toPath());
             }
+        }
+    }
+    private static long readAgentOutput(java.io.File result,long offset,
+            StringBuilder into,java.util.function.Consumer<String> onOutput) throws IOException {
+        long remaining=Math.min(24576-offset,result.length()-offset);
+        if(remaining<=0)return 0;
+        byte[] bytes=new byte[(int)Math.min(remaining,4096)];
+        try(java.io.RandomAccessFile stream=new java.io.RandomAccessFile(result,"r")){
+            stream.seek(offset);
+            int count=stream.read(bytes);
+            if(count<=0)return 0;
+            String text=new String(bytes,0,count,StandardCharsets.UTF_8);
+            into.append(text);
+            onOutput.accept(text);
+            return count;
         }
     }
     private static String shellQuote(String value){
