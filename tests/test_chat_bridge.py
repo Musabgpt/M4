@@ -22,7 +22,7 @@ class ChatBridgeContract(unittest.TestCase):
     def test_real_pty_service_is_used_for_tool_commands(self):
         service=read(JAVA/"TerminalService.java")
         tool=read(KT/"M4NativeTools.kt")
-        self.assertIn("service.runAgentCommand(command,seconds)",tool)
+        self.assertIn("service.runAgentCommand(command, seconds)",tool)
         self.assertIn("LinuxEnvironment.install(this)",service)
         self.assertIn("write(agentSession,statement)",service)
         self.assertIn('String path="/root/.m4-chat-tools/"',service)
@@ -55,8 +55,42 @@ class ChatBridgeContract(unittest.TestCase):
         main=read(JAVA/"MainActivity.java")
         self.assertIn("EXTRA_GITHUB_LOGIN",main)
         self.assertIn("gh auth login --hostname github.com --git-protocol https --web",main)
-        self.assertIn("connectGithub",read(KT/"M4ChatActivity.kt"))
+        self.assertIn("EmbeddedTerminalSheet",read(KT/"ChatScreen.kt"))
+        self.assertIn("gh auth login --hostname github.com --git-protocol https --web",read(KT/"ChatScreen.kt"))
         self.assertIn("ربط GitHub رسمياً",read(KT/"ChatScreen.kt"))
+
+
+    def test_embedded_terminal_is_real_interactive_pty_not_an_external_activity(self):
+        pane=read(KT/"EmbeddedTerminalSheet.kt")
+        service=read(JAVA/"TerminalService.java")
+        screen=read(KT/"ChatScreen.kt")
+        activity=read(KT/"M4ChatActivity.kt")
+        self.assertIn("EmbeddedTerminalSheet",screen)
+        self.assertIn("openChatSession()",pane)
+        self.assertIn("backend.write(s,",pane)
+        self.assertIn("backend.renderChatSession(s)",pane)
+        self.assertIn("chatSession=create(false,true",service)
+        self.assertIn("private Session chatSession;",service)
+        self.assertNotIn("MainActivity::class.java",activity)
+        self.assertIn("m4-agent-start ",screen)
+        self.assertIn("provider.env",pane)
+
+    def test_model_terminal_streams_cancels_and_remembers_cwd(self):
+        service=read(JAVA/"TerminalService.java")
+        bridge=read(KT/"M4NativeTools.kt")
+        vm=read(KT/"ChatViewModel.kt")
+        screen=read(KT/"ChatScreen.kt")
+        api=read(KT/"ChatApi.kt")
+        self.assertIn("cancelAgentCommand()",service)
+        self.assertIn("cancelTerminalCommand()",vm)
+        self.assertIn("readAgentOutput",service)
+        self.assertIn("onOutput.accept(text)",service)
+        self.assertIn("current.cwd",service)
+        self.assertIn("pwd -P",service)
+        self.assertIn("MAX_TOOL_ROUNDS=12",api)
+        self.assertIn("identicalObservations>=2",api)
+        self.assertIn("val terminalOutput by vm.terminalOutput.collectAsState()",screen)
+        self.assertIn("service.runAgentCommand(command, seconds)",bridge)
 
     def test_only_main_push_workflow_generates_apk(self):
         android=read(ROOT/".github/workflows/android.yml")
