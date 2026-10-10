@@ -70,7 +70,14 @@ class M4NativeTools(private val app: Application) {
                 if (!explicitGithubIntent(userRequest)) "اطلب ربط GitHub بوضوح أولاً."
                 else withContext(Dispatchers.Main) { githubConnect() }
             }
-            "github_status" -> executeTerminal("gh auth status", 25)
+            "github_status" -> {
+                // Never send GitHub CLI output containing auth metadata or
+                // potential token fragments to a third-party free LLM route.
+                val result=executeTerminal("gh auth status", 25)
+                if(result.startsWith("exit_code=0"))
+                    "GitHub CLI مسجل الدخول. بيانات الاعتماد محفوظة محلياً ولم تُرسل للنموذج."
+                else "GitHub CLI غير مرتبط أو غير متاح. استخدم زر ربط GitHub الرسمي."
+            }
             "terminal_command" -> {
                 val command=args.optString("command","").trim()
                 if (!approvedShell) "رفض المستخدم الإذن بتنفيذ الأمر."

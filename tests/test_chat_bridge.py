@@ -41,8 +41,6 @@ class ChatBridgeContract(unittest.TestCase):
         self.assertIn("ToolApproval",view)
         self.assertIn("vm.decideTool(true)",screen)
         self.assertIn("vm.decideTool(false)",screen)
-        self.assertIn("use the user's language",read(ROOT/"app/src/main/assets/m4-chat-system.txt")
-                      .lower() if False else api) if False else None
 
     def test_chat_prompt_is_used_not_only_packaged(self):
         vm=read(KT/"ChatViewModel.kt")

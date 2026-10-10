@@ -125,7 +125,7 @@ fun ChatScreen(
             title = { Text("موافقة على أمر الطرفية العربية") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Text("النموذج يطلب تشغيل أمر حقيقي في Alpine داخل التطبيق. وافق فقط إذا تعرف ما يفعله.")
+                    Text("النموذج يطلب تشغيل أمر حقيقي في Alpine داخل التطبيق. راجع الأمر قبل السماح؛ قد تُرسل نتيجة تنفيذه إلى مزود النموذج المجاني. لا تسمح بأوامر تكشف كلمات المرور أو الرموز.")
                     Surface(
                         color = colors.surfaceVariant,
                         shape = RoundedCornerShape(10.dp)
