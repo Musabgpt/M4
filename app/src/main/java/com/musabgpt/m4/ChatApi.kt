@@ -30,7 +30,8 @@ object ChatApi {
     @Volatile private var stopped=false
     @Volatile private var preferredRoute: String?=null
     private val cooldown=ConcurrentHashMap<String,Long>()
-    private const val MAX_TOOL_ROUNDS=3
+    private const val MAX_TOOL_ROUNDS=12
+    private const val MAX_TOOL_CALLS=30
 
     fun stop() { stopped=true; connection?.disconnect() }
 
@@ -97,6 +98,9 @@ object ChatApi {
         }
         val original=history.lastOrNull { it.role=="user" }?.content.orEmpty()
         val arabic=original.any { it in '\u0600'..'\u06FF' }
+        var toolCallsExecuted=0
+        var lastObservation=""
+        var identicalObservations=0
         for (round in 0..MAX_TOOL_ROUNDS) {
             var response: Turn?=null
             var problem: Exception?=null
@@ -128,13 +132,14 @@ object ChatApi {
                 if (!result.textSent) throw IllegalStateException("المزود أعاد إجابة فارغة")
                 return@flow
             }
-            if(round==MAX_TOOL_ROUNDS) {
-                emit(ChatEvent.Text("\nتم بلوغ الحدّ الآمن لدورات الأدوات. راجع النتائج قبل المتابعة."))
+            if(round==MAX_TOOL_ROUNDS ||
+                toolCallsExecuted + result.calls.size > MAX_TOOL_CALLS) {
+                emit(ChatEvent.Text("\nتوقفت المهمة عند حدّ الأدوات الآمن. بعض الخطوات غير مكتملة؛ أعد المحاولة بعد مراجعة النتائج."))
                 return@flow
             }
             conversation.put(JSONObject().put("role","assistant")
                 .put("content",result.bodyText).put("tool_calls",result.toolJson))
-            for(call in result.calls.take(3)) {
+            for(call in result.calls) {
                 if(stopped) throw CancellationException("تم إيقاف الأدوات")
                 emit(ChatEvent.ToolStatus("تشغيل " + call.name + " باستخدام أدوات M4…"))
                 val resultText=try { execute(call) } catch(e: CancellationException) {
@@ -142,9 +147,18 @@ object ChatApi {
                 } catch(e: Exception) {
                     "فشل تنفيذ الأداة: " + (e.message ?: "غير معروف")
                 }
+                toolCallsExecuted++
                 conversation.put(JSONObject().put("role","tool")
                     .put("tool_call_id",call.id).put("content",resultText.take(7000)))
                 emit(ChatEvent.ToolStatus(call.name + ": " + resultText.take(500)))
+                val observation=call.name + ":" + call.arguments.toString() +
+                    ":" + resultText.trim().take(1800)
+                identicalObservations=if(observation==lastObservation) identicalObservations+1 else 0
+                lastObservation=observation
+                if(identicalObservations>=2) {
+                    emit(ChatEvent.Text("\nتوقفت بعد تكرار الأداة والنتيجة دون تقدّم ثلاث مرات. لم أعتبر المهمة ناجحة."))
+                    return@flow
+                }
             }
         }
     }.flowOn(Dispatchers.IO)
