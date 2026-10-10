@@ -3,17 +3,31 @@ plugins {
     id 'org.jetbrains.kotlin.android'
     id 'org.jetbrains.kotlin.plugin.compose'
 }
+// A certificate fingerprint is public information; it is NOT a signing key.
+// Release builds require the original NewAl-Cloud key injected by CI.
+def releaseFile = System.getenv('MUSABAI_RELEASE_STORE_FILE')
+def releaseStorePassword = System.getenv('MUSABAI_RELEASE_STORE_PASSWORD')
+def releaseKeyAlias = System.getenv('MUSABAI_RELEASE_KEY_ALIAS')
+def releaseKeyPassword = System.getenv('MUSABAI_RELEASE_KEY_PASSWORD')
+def signingFields = [releaseFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword]
+def hasReleaseSigning = signingFields.every { it != null && !it.isEmpty() }
+if (signingFields.any { it != null && !it.isEmpty() } && !hasReleaseSigning) {
+    throw new GradleException('Incomplete persistent NewAl release signing credentials')
+}
+
 android {
     namespace 'io.musab.arabicterminal'
     compileSdk 36
     ndkVersion '27.2.12479018'
     defaultConfig {
-        applicationId 'com.musabgpt.m4'
+        applicationId 'dev.newal.code.lite.connectors'
         ndk { abiFilters 'arm64-v8a' }
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName '1.0.2'
+        // NewAl-Cloud last compatible release build used versionCode 363.
+        // GitHub M4_BUILD_NUMBER monotonically advances across releases.
+        versionCode (10000 + ((System.getenv('M4_BUILD_NUMBER') ?: '0') as Integer))
+        versionName '2.0.0'
         externalNativeBuild { cmake { cFlags '-std=c11' } }
     }
     externalNativeBuild {
@@ -37,7 +51,35 @@ android {
     }
     buildFeatures { compose true }
     kotlinOptions { jvmTarget = '17' }
-    buildTypes { release { minifyEnabled false } }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            musabRelease {
+                storeFile file(releaseFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+                enableV4Signing false
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            // Development builds must NEVER masquerade as an update for
+            // the NewAl release package with a different debug key.
+            applicationIdSuffix '.m4dev'
+        }
+        release {
+            minifyEnabled false
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.musabRelease
+            } else {
+                signingConfig null
+            }
+        }
+    }
 }
 
 dependencies {

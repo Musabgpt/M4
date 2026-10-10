@@ -1,46 +1,45 @@
-# M4 — MusabAI + Term for Android
+# M4 v2 — MusabAI + Arabic Terminal
 
-A standalone Android application combining **Term v0.11.1** (native Android PTY + bundled Alpine ARM64/PRoot + coding agent) and selected, verified **NewAl-Cloud** capabilities, presented in the supplied Kotlin Jetpack Compose chat UI.
+A native Android ARM64 app with the user-supplied warm-paper/dark Compose chat design, **one integrated Arabic Terminal** (Alpine Linux + PRoot + PTY), and a bounded AI coding agent. Everything in this repository is authored and built from **Musabgpt/M4**; upstream source repos are only references.
 
-## Verified source selection
+## One interface, fixed source families
 
-- `Musabgpt/Term` commit `579a96cb98ab997a4131a6212a515b55f5b37dd2`, successful build on October 10, 2026.
-- `Musabgpt/NewAl-Cloud` commit `d34858159aeb71c24b6d01aaba5a7a717fb33e73`, its latest advanced successful CI on October 9, 2026. NewAl-Cloud's later main branch was deliberately reset to the older Action 125 baseline, so M4 pins this known-green advanced commit instead.
-- User-provided Kotlin UI references: `ChatScreen.kt`, `ChatViewModel.kt`, `ChatApi.kt`, adapted into `app/src/main/java/com/musabgpt/m4/`.
+The chat model selector contains **exactly four fixed gateway projects**. There is **no local GGUF/LLM importer**, no custom endpoint form, no manual API key input, no Termux bridge and no old Pi/Ralph plugins.
 
-## What works
+| Source project | M4 integration | Honest availability |
+| --- | --- | --- |
+| [0xzr/freellmpool](https://github.com/0xzr/freellmpool) | Built-in, audited keyless OpenAI-compatible upstream route catalog: Kilo, LLM7, Pollinations, OVHcloud; bounded HTTPS SSE + fallback | Works only when an external free provider responds; quotas and privacy vary; M4 embeds compatible routing logic, not the entire upstream Python distribution |
+| [xtekky/gpt4free](https://github.com/xtekky/gpt4free) | Fixed loopback adapter for GPT4Free's OpenAI-compatible API at 127.0.0.1:1337 | GPT4Free backend is **not included**; it may need browser-based auth or heavy Python dependencies |
+| [MrFadiAi/free-llm-gateway](https://github.com/MrFadiAi/free-llm-gateway) | Fixed loopback adapter at 127.0.0.1:8080 | Its code was not accessible through live GitHub API during integration; its upstream typically needs provider keys. Not presented as a hosted anonymous service |
+| [PryxIntel/free-llm-api](https://github.com/PryxIntel/free-llm-api) | Fixed loopback adapter at 127.0.0.1:3001 | PryxIntel runs a Node/SQLite gateway which may require its own configuration and credentials; not shipped as a running server |
 
-- Kotlin Compose Arabic chat with sidebar, streaming SSE, stop, session history, model/provider picker and settings.
-- Default NewAl keyless Kilo Auto Free route (subject to provider availability), optional user-supplied Groq/Gemini/OpenRouter/custom API credentials, and fallback to configured providers on connection failures.
-- **تنفيذ كود** opens the built-in Term Android terminal and starts `term-agent` on the entered objective in `/root/projects/M4`. No separate Termux app or wireless debugging is required.
-- Native Android terminal, Alpine Linux, Python, Node/npm, Bash, Git, tmux, pytest, GitHub CLI, Tree-sitter, ast-grep, agent history in SQLite, backups, verification and bounded resume.
-- Real NewAl-Cloud `continuity` and `task_state` modules integrated with the Term coding loop. NewAl task checkpoints only mark complete *after* verification.
-- App ID `com.musabgpt.m4`, separate from Term's original ID so existing Term installations remain untouched.
+Selecting an unavailable loopback family transparently falls back to FreeLLMPool-approved anonymous routes. The chat shows the *actual route* used; a label in a list is never proof that its server is running. Providers are not guaranteed to be free forever, keyless forever, or to allow unlimited requests. User messages are transmitted to the active external gateway; do not send secrets through public free routes.
 
-## Important limits
+## Native coding, not a separate terminal app
 
-**This is a selective code integration**, not a claim that the entire NewAl Python engine, every MCP connection, and every cloud integration was migrated. NewAl's full Android native engine depends on a different PRoot/Python/server distribution and build pipeline. The M4 coding agent uses Term's existing Linux engine; only verified portable NewAl components are wired in. Some Pi/Ralph integrations need an optional network install.
-No model weights, universal free inference, unbounded loops or unlimited API requests are included. Kilo's availability and tool-calling capability are controlled by its service; a fallback model must support tool calls for coding automation.
+Compose **تنفيذ كود** opens the built-in Arabic Terminal in the same APK. The launcher seeds a real editable offline M4 source checkout at `/root/projects/M4` and invokes the integrated `term-agent`; existing files are preserved. The agent understands the fixed selected source family and uses bounded tool-calling HTTP requests. Its **real seven tools** are `list_files`, `read_file`, `search_code`, `git_status`, `write_file`, approval-gated `run_command` and independently checked `finish`. It uses SQLite events, NewAl's verified continuity/checkpoint modules, backups, test checks and bounded resume.
 
-Use the cloud chat without configuring a key when the free endpoint is available. The coding agent receives the selected model configuration through an app-private shell environment file. If the model cannot return tool calls, the agent stops with a diagnostic rather than pretending completion.
+The system prompt in `agent/system_prompt.md` is an original M4-specific adaptation of the publicly archived [Claude Code Opus 5.5 reference](https://github.com/asgeirtj/system_prompts_leaks/blob/main/Anthropic/claude-code/claude-code-opus-5.5.md), rewritten for real M4 tools and its mobile limitations, **not copied verbatim**. The model is a remote free route chosen at execution time, **not Claude Opus 5.5**, and a prompt alone does not upgrade reasoning capability.
 
-Android foreground services cannot guarantee indefinite activity. `term-agent resume` and `term-agent-watch` continue from saved state when a process survives or is restarted.
+Free chat may work without a key when one keyless provider is available. Coding automation needs a model that correctly supports tool calls; when none does, the task remains blocked, never falsely marked complete. Invoking native shell commands can alter or delete project files, and is **not a hardened sandbox**. Android may stop background processes: state is persisted, but indefinite execution is not guaranteed.
 
-**Safety:** The coding agent can run project commands. The UI asks for confirmation first, but `--allow-exec` grants broad interpreter access; use trusted projects and make backups. Provider API keys are kept in app-private preferences/files, not committed. The model provider receives the submitted text. Real-phone testing is required beyond a successful CI build.
+## Android build and update signing
 
-## Build
+Two kinds of APK deliberately have **different Android package identifiers**:
 
-GitHub Actions workflow `android.yml` generates a debug APK embedding verified Alpine + PRoot. A lighter `m4-kotlin.yml` checks compilation without the Linux bundle.
-The debug signing key may change between runs. Export any important app-private projects before reinstalling.
+- **Development APK**: `dev.newal.code.lite.connectors.m4dev` — GitHub Actions `ArabicTerminal-debug-APK` for testing; uses ordinary debug signing. Cannot replace the old NewAl-Cloud app or an existing `com.musabgpt.m4` install.
+- **Production signed update**: `dev.newal.code.lite.connectors` — same package as NewAl-Cloud's *advanced connectors release* (CI run 37916175916, versionCode 363), versionCode 10000 + Actions run number; produced **only** if M4 GitHub Actions has the original secret `MUSABAI_RELEASE_SIGNING_BUNDLE`.
 
+The public certificate SHA-256 pinned at `android/signing-cert-sha256.txt` is:
 
-## v1.0.1 — Real M4 project execution
+`6af53b6b3e2574eed16aaae7ce92ade3dcde702a74af1dfae994c9c87609cbb6`
 
-The Compose **تنفيذ كود** button now calls bundled `m4-agent-start` rather than creating an empty workspace. On first run the command copies the verified M4 source snapshot embedded in the APK into `/root/projects/M4` (or clones the public repository if the snapshot is unavailable); later runs **preserve local modifications** and reuse that checkout without an automatic pull/reset. A pre-existing non-checkout directory fails safely instead of being erased. The launcher configures `python3 -m unittest discover -s agent_tests -v` as real project verification, and the agent only reports completion after successful checks. Building the Android APK still requires GitHub Actions/Android SDK; Python tests do not prove Android correctness. User API/provider selection is forwarded using the private `provider.env` written by the app.
+A certificate fingerprint **is not a private key**. A matching keystore and alias/private password must be supplied through the M4 repository's encrypted Actions secret. `scripts/build-signed-release.sh` decodes the bundle in the runner temporary directory, signs and **verifies the actual release APK certificate** against that pin, rejects any mismatch, and removes the keystore at job exit. If the secret is unavailable, the workflow publishes **only the separate development APK**, never a falsely signed update.
 
-The offline seed is a new local Git baseline, not a reproduction of the remote Git history. To work with the latest upstream changes, connect and review `git fetch origin` followed by an appropriate merge; the launcher never resets or force-pulls user changes.
+The earlier NewAl-Cloud baseline package `dev.newal.code.lite` and standalone M4 `com.musabgpt.m4` have different application IDs; Android cannot update either in-place from this advanced-connectors variant. Do not uninstall an existing app with private projects until you have exported a backup and confirmed which package is installed.
 
+## Validation / limitations
 
-## v1.0.2 — Agent progress in Compose
+CI runs Python agent tests, Kotlin/Compose compilation, rootfs integrity and native build tests, and Android SDK/NDK debug APK construction. A successful CI build is not proof of on-device UX or free-route uptime. APK updates preserve old private files only when Android sees the **exact package and signer** match; M4's Linux runtime upgrades preserve user folders and task history. Signed release builds depend on the original private key, which cannot be retrieved from the public source repository or reconstructed from its certificate fingerprint.
 
-The chat app now has an **حالة الوكيل** (agent status) action. It reads the real app-private `/root/projects/M4/.term-agent/state.json` from the installed Alpine environment and displays the saved goal, phase, step count and verification summary. A manually triggered **استئناف** action can continue a task that paused at its iteration limit; active or blocked tasks are not automatically duplicated. The view is an on-demand snapshot with a Refresh button, not a claim of live backend streaming.
+This distribution does not bundle local model weights, require root or ADB, give every gateway unauthorized access, or claim unlimited free service.

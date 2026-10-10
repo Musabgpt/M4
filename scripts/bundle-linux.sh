@@ -48,18 +48,17 @@ git -C "$SEED" -c user.name='M4 APK Seed' -c user.email='m4-seed@localhost.inval
 git -C "$SEED" remote add origin https://github.com/Musabgpt/M4.git
 test -d "$SEED/.git"
 
-# Ship the autonomous coding engine offline. Optional network-installed add-ons
-# are deliberately not fetched during the Android build.
+# Ship only the integrated M4 engine and fixed gateway catalog offline.
 mkdir -p "$STAGING/opt/term-agent" "$STAGING/usr/local/bin"
 cp "$ROOT/agent/agent.py" "$STAGING/opt/term-agent/agent.py"
 cp -R "$ROOT/agent/newal" "$STAGING/opt/term-agent/newal"
 find "$STAGING/opt/term-agent/newal" -type f -name '*.pyc' -delete
-cp "$ROOT/agent/tool-registry.json" "$STAGING/opt/term-agent/tool-registry.json"
+cp "$ROOT/agent/system_prompt.md" "$STAGING/opt/term-agent/system_prompt.md"
+cp "$ROOT/agent/provider_routes.py" "$STAGING/opt/term-agent/provider_routes.py"
 cp "$ROOT/agent/term-agent.sh" "$STAGING/usr/local/bin/term-agent"
-cp "$ROOT/agent/term-agent-addons.sh" "$STAGING/usr/local/bin/term-agent-addons"
 cp "$ROOT/agent/term-agent-watch.sh" "$STAGING/usr/local/bin/term-agent-watch"
 cp "$ROOT/agent/m4-agent-start.sh" "$STAGING/usr/local/bin/m4-agent-start"
-chmod 755 "$STAGING/usr/local/bin/term-agent" "$STAGING/usr/local/bin/term-agent-addons" "$STAGING/usr/local/bin/term-agent-watch" "$STAGING/usr/local/bin/m4-agent-start"
+chmod 755 "$STAGING/usr/local/bin/term-agent" "$STAGING/usr/local/bin/term-agent-watch" "$STAGING/usr/local/bin/m4-agent-start"
 python3 -m py_compile "$ROOT/agent/agent.py"
 test -s "$STAGING/opt/term-agent/agent.py"
 test -s "$STAGING/usr/bin/pytest"

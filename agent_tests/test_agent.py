@@ -70,11 +70,21 @@ class TestTermAgent(unittest.TestCase):
         ok,_=agent.verify(self.root,self.state,True)
         self.assertTrue(ok)
 
-    def test_provider_rejects_insecure_http(self):
+    def test_manual_api_cannot_override_built_in_gateway(self):
         with patch.dict(os.environ,{"TERM_AGENT_API_BASE":"http://evil.example/v1",
                                      "TERM_AGENT_MODEL":"mock"}):
-            with self.assertRaises(ValueError):
-                agent.endpoint()
+            url,model=agent.endpoint()
+        self.assertEqual(url,"https://api.kilo.ai/api/gateway/chat/completions")
+        self.assertEqual(model,"kilo-auto/free")
+
+    def test_symlink_into_private_metadata_is_blocked(self):
+        (self.root/".git").mkdir()
+        (self.root/".git"/"config").write_text("secret")
+        (self.root/"fake-git").symlink_to(self.root/".git",target_is_directory=True)
+        with self.assertRaises(ValueError):
+            agent.safe_path(self.root,"fake-git/config")
+        with self.assertRaises(ValueError):
+            agent.safe_path(self.root,"fake-git/config",write=True)
 
     def test_loop_finish_verified_and_persisted(self):
         agent.save(self.state/"checks.json",["python3 -V"])

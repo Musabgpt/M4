@@ -13,7 +13,7 @@ provider="${M4_AGENT_PROVIDER_FILE:-/root/.m4-agent/provider.env}"
 source_repo="https://github.com/Musabgpt/M4.git"
 seed="${M4_AGENT_SEED:-/opt/m4-seed}"
 if [ ! -f "$provider" ]; then
-  echo "Missing private provider settings; configure the model in the M4 chat UI." >&2
+  echo "No built-in gateway selection found: open M4 chat." >&2
   exit 3
 fi
 if [ -d "$project/.git" ]; then
@@ -44,13 +44,12 @@ fi
 # This checks the real source tree; 'python3 -V' is not a valid project test.
 term-agent init
 term-agent check-add 'python3 -m unittest discover -s agent_tests -v'
-# Source the private provider configuration only after validating the checkout.
-# Command processes launched by term-agent do not inherit provider keys.
+# Only a fixed, harmless gateway family name is sourced here, not API credentials.
 . "$provider"
-if [ -z "${TERM_AGENT_API_BASE:-}" ] || [ -z "${TERM_AGENT_MODEL:-}" ]; then
-  echo "Model settings are incomplete." >&2
-  exit 7
-fi
+case "${M4_GATEWAY_FAMILY:-freellmpool}" in
+    freellmpool|gpt4free|free-llm-gateway|free-llm-api) ;;
+    *) echo "Unsupported M4 gateway family" >&2; exit 7 ;;
+esac
 echo "Project source: $project"
 echo "Independent Python agent checks configured. Android APK build runs in GitHub CI."
 exec term-agent run "$goal" --steps 40 --allow-exec
