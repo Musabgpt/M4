@@ -62,6 +62,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val _terminalMode=MutableStateFlow(false)
     val terminalMode=_terminalMode.asStateFlow()
     private var terminalMonitorJob: Job?=null
+    private var liveTerminalMessageId: String?=null
     private data class PendingWhatsApp(val action: String, val conversationId: String, val replyId: String)
     private var pendingWhatsApp: PendingWhatsApp?=null
     private val _contactsPermissionTicket=MutableStateFlow(0)
@@ -98,6 +99,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _terminalMode.value=true
         val convId=_currentId.value
         val terminalMessage=UiMessage(role="terminal", content="```sh\nجاري تجهيز Alpine Linux...\n```")
+        liveTerminalMessageId=terminalMessage.id
         edit(convId) { it.copy(messages=it.messages + terminalMessage) }
         terminalMonitorJob?.cancel()
         terminalMonitorJob=viewModelScope.launch {
@@ -114,14 +116,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         lastScreen=screen
                         val formatted="```sh\n"+screen+"\n```"
                         edit(convId) { conv -> conv.copy(messages=conv.messages.map {
-                            if (it.id==terminalMessage.id) it.copy(content=formatted) else it
+                            if (it.id==liveTerminalMessageId) it.copy(content=formatted) else it
                         }) }
                     }
                     delay(280)
                 }
             } catch (e: Exception) {
                 edit(convId) { conv -> conv.copy(messages=conv.messages.map {
-                    if (it.id==terminalMessage.id)
+                    if (it.id==liveTerminalMessageId)
                         it.copy(content="تعذّرت الطرفية الفعلية: "+(e.message?:"خطأ غير معروف"))
                     else it
                 }) }
@@ -134,6 +136,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun leaveTerminal() {
         _terminalMode.value=false
+        liveTerminalMessageId=null
         terminalMonitorJob?.cancel()
         terminalMonitorJob=null
         saveHistory()
@@ -225,7 +228,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (_terminalMode.value) {
             val id=_currentId.value
-            edit(id) { it.copy(messages=it.messages + UiMessage(role="user",content=clean)) }
+            val terminalReply=UiMessage(role="terminal",content="```sh\nجاري تنفيذ الأمر...\n```")
+            liveTerminalMessageId=terminalReply.id
+            edit(id) { it.copy(messages=it.messages + UiMessage(role="user",content=clean) +
+                terminalReply) }
             try { inChatTerminal.writeLine(clean) }
             catch (e: Exception) { edit(id) { it.copy(messages=it.messages +
                 UiMessage(role="assistant",content="خطأ في الطرفية: "+e.message.orEmpty())) } }
