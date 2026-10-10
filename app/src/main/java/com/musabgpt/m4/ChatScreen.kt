@@ -130,6 +130,7 @@ fun ChatScreen(
     }
     if (showTerminal) {
         EmbeddedTerminalSheet(initialCommand=terminalCommand,
+            providerFamily=provider.id,
             onDismiss={ showTerminal=false; terminalCommand=null })
     }
 
