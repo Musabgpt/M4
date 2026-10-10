@@ -125,7 +125,7 @@ fun ChatScreen(
     var showAgentConfirm by remember { mutableStateOf(false) }
     var showAgentProgress by remember { mutableStateOf(false) }
     var agentProgress by remember { mutableStateOf<AgentProgress?>(null) }
-    val terminalMode by vm.terminalMode.collectAsState()
+    val backgroundTaskRunning by vm.backgroundTaskRunning.collectAsState()
     fun launchTerminal(command: String? = null) {
         vm.launchTerminal(command)
     }
@@ -311,11 +311,6 @@ fun ChatScreen(
                         }) {
                             Icon(Icons.Filled.Info, contentDescription = "حالة الوكيل")
                         }
-                        IconButton(onClick = {
-                            if (terminalMode) vm.leaveTerminal() else launchTerminal()
-                        }) {
-                            Icon(Icons.Filled.Terminal, contentDescription = "الطرفية العربية")
-                        }
                         IconButton(onClick = vm::newChat) {
                             Icon(Icons.Filled.Add, contentDescription = "محادثة جديدة")
                         }
@@ -324,19 +319,12 @@ fun ChatScreen(
             },
             bottomBar = {
                 Column {
-                    if (terminalMode) {
-                        Row(
-                            modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp),
-                            verticalAlignment=Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Filled.Terminal, contentDescription=null, tint=Clay,
-                                modifier=Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("المحادثة هي الطرفية • Alpine PTY مباشر",
-                                modifier=Modifier.weight(1f), fontSize=12.sp,
-                                color=colors.onSurfaceVariant)
-                            TextButton(onClick={ vm.terminalControl("\u0003") }) { Text("إيقاف الأمر") }
-                            TextButton(onClick={ vm.leaveTerminal() }) { Text("عودة للمساعد") }
+                    if (backgroundTaskRunning) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),
+                            verticalAlignment=Alignment.CenterVertically) {
+                            Text("Alpine يعمل في هذه المحادثة",
+                                modifier=Modifier.weight(1f), color=colors.onSurfaceVariant)
+                            TextButton(onClick={vm.stopBackgroundTask()}) { Text("إيقاف") }
                         }
                     }
                     Row(
@@ -381,7 +369,7 @@ fun ChatScreen(
                     InputBar(
                         text = input,
                         onTextChange = { input = it },
-                        hint = if (terminalMode) "اكتب أمر Alpine هنا مباشرة..." else "اكتب رسالتك...",
+                        hint = "اكتب رسالتك (أو ! ثم أمر Linux)...",
                         isStreaming = isStreaming,
                         onSend = {
                             vm.send(input)
