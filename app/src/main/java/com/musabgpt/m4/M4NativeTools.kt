@@ -30,7 +30,14 @@ class M4NativeTools(private val app: Application) {
 
         fun quickAction(userText: String): String? {
             val cleaned = userText.trim().replace(terminalOnlySuffix, "").trim()
+            // Decompose compound actions before the generic OPEN_APP parser
+            // mistakes an entire instruction for an app name.
+            WhatsAppPlanner.parse(cleaned)?.let { return it.asAction() }
             val normalized = ArabicCommandRouter.normalize(cleaned)
+            if ((normalized.contains("واتس") || normalized.contains("whatsapp")) &&
+                listOf("ارسل","ابعت","ابعث","ابريل","اريل","رسالة").any {
+                    normalized.contains(it)
+                }) return null
             if (normalized in listOf("اربط github", "ربط github", "اتصل ب github",
                     "وصل github", "ربط جيت هاب", "اربط جيت هاب",
                     "connect github", "github login")) return "github_connect"
@@ -48,6 +55,10 @@ class M4NativeTools(private val app: Application) {
 
     suspend fun performQuick(action: String): String = withContext(Dispatchers.Main) {
         if (action == "github_connect") return@withContext githubConnect()
+        val whatsapp=WhatsAppPlanner.fromAction(action)
+        if (whatsapp!=null) return@withContext PhoneController.prepareWhatsAppDraft(
+            app, whatsapp.recipient, whatsapp.body
+        )
         if (!action.startsWith("native:")) return@withContext "أمر غير مدعوم."
         PhoneController.run(app, ArabicCommandRouter.parse(action.removePrefix("native:")))
     }
@@ -71,6 +82,19 @@ class M4NativeTools(private val app: Application) {
                     "لم يطلب المستخدم استعراض التطبيقات المثبتة؛ لن أرسل قائمة التطبيقات إلى مزود خارجي."
                 } else withContext(Dispatchers.Main) {
                     PhoneController.run(app,ArabicCommandRouter.parse("اعرض التطبيقات")).take(5000)
+                }
+            }
+            "prepare_whatsapp_draft" -> {
+                val normalized=ArabicCommandRouter.normalize(userRequest)
+                if (!(normalized.contains("واتس") || normalized.contains("whatsapp")) ||
+                    !listOf("ارسل","ابعت","ابعث","رسالة").any { normalized.contains(it) }) {
+                    "لا يوجد طلب صريح لإعداد رسالة واتساب."
+                } else {
+                    val who=args.optString("recipient","").trim().take(100)
+                    val body=args.optString("message","").trim().take(2000)
+                    withContext(Dispatchers.Main) {
+                        PhoneController.prepareWhatsAppDraft(app,who,body)
+                    }
                 }
             }
             "github_connect" -> {
