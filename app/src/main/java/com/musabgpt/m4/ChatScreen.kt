@@ -151,7 +151,12 @@ fun ChatScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { vm.decideTool(true) }) { Text("السماح لهذا الأمر") }
+                Column {
+                    TextButton(onClick = { vm.decideTool(true) }) { Text("السماح لهذا الأمر") }
+                    TextButton(onClick = { vm.decideTool(true, approveTask = true) }) {
+                        Text("السماح لهذه المهمة (حتى 12 أمراً)")
+                    }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { vm.decideTool(false) }) { Text("رفض") }
