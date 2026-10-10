@@ -1,0 +1,50 @@
+#!/bin/sh
+# Start a coding task against the ACTUAL M4 sources, never an empty demo folder.
+# Alpine/PRoot runtime. No Termux, privileged shell or Android root required.
+set -eu
+umask 077
+goal="${1:-}"
+if [ -z "$goal" ]; then
+  echo "Missing coding goal: m4-agent-start 'Describe a task'" >&2
+  exit 2
+fi
+project="${M4_AGENT_PROJECT:-/root/projects/M4}"
+provider="${M4_AGENT_PROVIDER_FILE:-/root/.m4-agent/provider.env}"
+source_repo="https://github.com/Musabgpt/M4.git"
+if [ ! -f "$provider" ]; then
+  echo "Missing private provider settings; configure the model in the M4 chat UI." >&2
+  exit 3
+fi
+if [ -d "$project/.git" ]; then
+  echo "Using existing project: $project (local changes are preserved)"
+elif [ -e "$project" ]; then
+  # Never overwrite an existing directory and never silently use an empty project.
+  echo "Existing folder is not a Git checkout: $project" >&2
+  echo "Move it aside manually or select a different project directory." >&2
+  exit 4
+else
+  echo "Cloning M4 source: $source_repo"
+  mkdir -p "$(dirname "$project")"
+  git clone --depth=1 "$source_repo" "$project" || {
+    echo "Unable to clone M4. Check the network or GitHub access." >&2
+    exit 5
+  }
+fi
+cd "$project"
+if [ ! -f "agent/agent.py" ] || [ ! -d "agent_tests" ]; then
+  echo "This directory does not have the expected M4 agent sources." >&2
+  exit 6
+fi
+# This checks the real source tree; 'python3 -V' is not a valid project test.
+term-agent init
+term-agent check-add 'python3 -m unittest discover -s agent_tests -v'
+# Source the private provider configuration only after validating the checkout.
+# Command processes launched by term-agent do not inherit provider keys.
+. "$provider"
+if [ -z "${TERM_AGENT_API_BASE:-}" ] || [ -z "${TERM_AGENT_MODEL:-}" ]; then
+  echo "Model settings are incomplete." >&2
+  exit 7
+fi
+echo "Project source: $project"
+echo "Independent Python agent checks configured. Android APK build runs in GitHub CI."
+exec term-agent run "$goal" --steps 40 --allow-exec
