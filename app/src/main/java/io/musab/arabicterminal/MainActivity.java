@@ -78,7 +78,8 @@ public final class MainActivity extends Activity {
                 render();
                 if(pendingGithubLogin){
                     useLinux=true;
-                    if(active==null || !active.linux)createSession(false);
+                    // Interactive OAuth must NOT hijack the model's private PTY.
+                    createSession(false);
                     launchGithubLogin();
                 }
                 if(pendingAgentGoal!=null){
@@ -118,7 +119,7 @@ public final class MainActivity extends Activity {
             if(service!=null){
                 useLinux=true;
                 if(LinuxEnvironment.installed(this)){
-                    if(active==null || !active.linux)createSession(false);
+                    createSession(false);
                     launchGithubLogin();
                 } else if(!preparingLinux){
                     prepareLinux();
