@@ -97,7 +97,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         _terminalMode.value=true
         val convId=_currentId.value
-        val terminalMessage=UiMessage(role="terminal", content="\`\`\`sh\nجاري تجهيز Alpine Linux...\n\`\`\`")
+        val terminalMessage=UiMessage(role="terminal", content="```sh\nجاري تجهيز Alpine Linux...\n```")
         edit(convId) { it.copy(messages=it.messages + terminalMessage) }
         terminalMonitorJob?.cancel()
         terminalMonitorJob=viewModelScope.launch {
@@ -112,7 +112,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     val screen=inChatTerminal.screen()
                     if (screen!=lastScreen) {
                         lastScreen=screen
-                        val formatted="\`\`\`sh\n"+screen+"\n\`\`\`"
+                        val formatted="```sh\n"+screen+"\n```"
                         edit(convId) { conv -> conv.copy(messages=conv.messages.map {
                             if (it.id==terminalMessage.id) it.copy(content=formatted) else it
                         }) }
