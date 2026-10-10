@@ -196,9 +196,20 @@ public final class TerminalService extends Service {
             java.io.File result=new java.io.File(guestRoot,nonce+".out");
             java.io.File done=new java.io.File(guestRoot,nonce+".exit");
             String path="/root/.m4-chat-tools/"+nonce;
-            String statement="sh -c "+shellQuote(command)+
-                " > "+shellQuote(path+".out")+" 2>&1; "+
-                "_m4_exit=$?; printf '%s' \"$_m4_exit\" > "+shellQuote(path+".exit")+"\n";
+            String cwdPath="/root/.m4-chat-tools/current.cwd";
+            // A child sh -c would normally lose 'cd' between tool calls.
+            // Save PWD inside the guest after each completed command and restore
+            // it on the next invocation in the same private Alpine workspace.
+            String script="if [ -f "+shellQuote(cwdPath)+" ]; then "+
+                "_m4_cwd=$(cat "+shellQuote(cwdPath)+"); "+
+                "cd \"$_m4_cwd\" 2>/dev/null || cd /root; "+
+                "else cd /root; fi\n"+
+                command+"\n"+
+                "_m4_exit=$?\n"+
+                "pwd -P > "+shellQuote(cwdPath)+"\n"+
+                "printf '%s' \"$_m4_exit\" > "+shellQuote(path+".exit")+"\n";
+            String statement="sh -c "+shellQuote(script)+
+                " > "+shellQuote(path+".out")+" 2>&1\n";
             write(agentSession,statement);
             long until=android.os.SystemClock.elapsedRealtime()+seconds*1000L;
             long alreadyRead=0L;
