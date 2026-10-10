@@ -98,6 +98,21 @@ class ChatBridgeContract(unittest.TestCase):
         self.assertIn("val terminalOutput by vm.terminalOutput.collectAsState()",screen)
         self.assertIn("service.runAgentCommand(command, seconds)",bridge)
 
+    def test_whatsapp_compound_task_is_not_an_app_name(self):
+        parser=read(KT/"WhatsAppPlanner.kt")
+        bridge=read(KT/"M4NativeTools.kt")
+        phone=read(JAVA/"PhoneController.java")
+        screen=read(KT/"ChatScreen.kt")
+        api=read(KT/"ChatApi.kt")
+        self.assertIn("WhatsAppPlanner.parse(cleaned)",bridge)
+        self.assertIn('whatsapp_draft:',parser)
+        self.assertIn("prepareWhatsAppDraft",phone)
+        self.assertIn("READ_CONTACTS",read(ROOT/"app/src/main/AndroidManifest.xml"))
+        self.assertIn("RequestPermission()",screen)
+        self.assertIn('"prepare_whatsapp_draft"',api)
+        self.assertIn("لم تُرسل الرسالة تلقائياً",phone)
+        self.assertNotIn("ModalBottomSheet(",screen)
+
     def test_only_main_push_workflow_generates_apk(self):
         android=read(ROOT/".github/workflows/android.yml")
         kotlin=read(ROOT/".github/workflows/m4-kotlin.yml")
