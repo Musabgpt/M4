@@ -43,7 +43,10 @@ object ChatApi {
             JSONObject().put("type","object").put("properties",JSONObject())))
         put(tool("terminal_command","Run a real command in M4's embedded Alpine PTY, after a visible user confirmation. Never use to read credentials.",
             JSONObject().put("type","object").put("properties",JSONObject()
-                .put("command",JSONObject().put("type","string"))).put("required",JSONArray().put("command"))))
+                .put("command",JSONObject().put("type","string"))
+                .put("timeout_seconds",JSONObject().put("type","integer")
+                    .put("minimum",5).put("maximum",180)))
+                .put("required",JSONArray().put("command"))))
         put(tool("github_status","Read GitHub CLI authentication status using the native Alpine terminal.",
             JSONObject().put("type","object").put("properties",JSONObject())))
         put(tool("github_connect","Open M4's integrated terminal to connect GitHub with official gh device login.",
