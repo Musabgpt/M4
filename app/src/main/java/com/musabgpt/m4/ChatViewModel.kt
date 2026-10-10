@@ -63,6 +63,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val terminalMode=_terminalMode.asStateFlow()
     private var terminalMonitorJob: Job?=null
     private var liveTerminalMessageId: String?=null
+    private var terminalReady=false
+    private val queuedTerminalLines=ArrayDeque<String>()
+    private fun sendTerminalLine(line: String) {
+        if (!terminalReady) {
+            queuedTerminalLines.addLast(line)
+            return
+        }
+        if (line.startsWith("m4-agent-start ")) inChatTerminal.configureAgent(selected.id)
+        inChatTerminal.writeLine(line)
+    }
     private data class PendingWhatsApp(val action: String, val conversationId: String, val replyId: String)
     private var pendingWhatsApp: PendingWhatsApp?=null
     private val _contactsPermissionTicket=MutableStateFlow(0)
@@ -90,13 +100,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** One Activity, one transcript, one composer: interactive Alpine lives in chat. */
     fun launchTerminal(command: String? = null) {
         if (_terminalMode.value) {
-            if (!command.isNullOrBlank()) {
-                if (command.startsWith("m4-agent-start ")) inChatTerminal.configureAgent(selected.id)
-                inChatTerminal.writeLine(command)
-            }
+            if (!command.isNullOrBlank()) sendTerminalLine(command)
             return
         }
         _terminalMode.value=true
+        terminalReady=false
+        if (!command.isNullOrBlank()) queuedTerminalLines.addLast(command)
         val convId=_currentId.value
         val terminalMessage=UiMessage(role="terminal", content="```sh\nجاري تجهيز Alpine Linux...\n```")
         liveTerminalMessageId=terminalMessage.id
@@ -105,9 +114,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         terminalMonitorJob=viewModelScope.launch {
             try {
                 inChatTerminal.connect()
-                if (!command.isNullOrBlank()) {
-                    if (command.startsWith("m4-agent-start ")) inChatTerminal.configureAgent(selected.id)
-                    inChatTerminal.writeLine(command)
+                terminalReady=true
+                while (queuedTerminalLines.isNotEmpty()) {
+                    sendTerminalLine(queuedTerminalLines.removeFirst())
                 }
                 var lastScreen=""
                 while (isActive && _terminalMode.value) {
@@ -121,6 +130,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     delay(280)
                 }
+            } catch (_: CancellationException) {
+                // Leaving terminal mode is not a PTY error.
             } catch (e: Exception) {
                 edit(convId) { conv -> conv.copy(messages=conv.messages.map {
                     if (it.id==liveTerminalMessageId)
@@ -136,6 +147,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun leaveTerminal() {
         _terminalMode.value=false
+        terminalReady=false
+        queuedTerminalLines.clear()
         liveTerminalMessageId=null
         terminalMonitorJob?.cancel()
         terminalMonitorJob=null
@@ -232,7 +245,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             liveTerminalMessageId=terminalReply.id
             edit(id) { it.copy(messages=it.messages + UiMessage(role="user",content=clean) +
                 terminalReply) }
-            try { inChatTerminal.writeLine(clean) }
+            try { sendTerminalLine(clean) }
             catch (e: Exception) { edit(id) { it.copy(messages=it.messages +
                 UiMessage(role="assistant",content="خطأ في الطرفية: "+e.message.orEmpty())) } }
             return
