@@ -62,6 +62,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val approval=_approval.asStateFlow()
     private val _terminalLaunch=MutableStateFlow<TerminalLaunch?>(null)
     val terminalLaunch=_terminalLaunch.asStateFlow()
+    private val _terminalOutput=MutableStateFlow("")
+    val terminalOutput=_terminalOutput.asStateFlow()
     private var taskApprovedCommands=0
     fun launchTerminal(command: String? = null) { _terminalLaunch.value=TerminalLaunch(command=command) }
     fun consumeTerminalLaunch(id: String) {
@@ -148,6 +150,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val conv = _conversations.value.first { it.id == convId }
         val history = conv.messages.dropLast(1).map { ChatMessage(it.role, it.content) }
         taskApprovedCommands=0
+        _terminalOutput.value=""
         val primary=selected
         val quick=M4NativeTools.quickAction(clean)
         _activeRoute.value=if(quick!=null) "أدوات أندرويد المحلية" else "جاري الاتصال..."
@@ -193,7 +196,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         } else nativeTools.execute(call.name,call.arguments,clean,approved) { chunk ->
                             // Genuine PTY stdout, captured while the command is running.
                             val limited=chunk.takeLast(1500)
-                            if(limited.isNotBlank()) _activeRoute.value="الطرفية: "+limited.takeLast(80).replace("\n"," ")
+                            if(limited.isNotBlank()) {
+                                _terminalOutput.value=(_terminalOutput.value+limited).takeLast(8000)
+                                _activeRoute.value="الطرفية: "+limited.takeLast(80).replace("\n"," ")
+                            }
                         }
                     }.collect { event ->
                         when(event) {
