@@ -58,9 +58,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val streaming = _streaming.asStateFlow()
     private var job: Job? = null
     private val nativeTools=M4NativeTools(app)
+    // Alpine runs as a background engine. The chat composer never changes mode.
     private val inChatTerminal=InChatTerminal(app)
-    private val _terminalMode=MutableStateFlow(false)
-    val terminalMode=_terminalMode.asStateFlow()
+    private val _backgroundTaskRunning=MutableStateFlow(false)
+    val backgroundTaskRunning=_backgroundTaskRunning.asStateFlow()
     private var terminalMonitorJob: Job?=null
     private var liveTerminalMessageId: String?=null
     private var terminalReady=false
@@ -97,65 +98,89 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val _terminalOutput=MutableStateFlow("")
     val terminalOutput=_terminalOutput.asStateFlow()
     private var taskApprovedCommands=0
-    /** One Activity, one transcript, one composer: interactive Alpine lives in chat. */
+    /**
+     * Run user-requested interactive Alpine tasks IN a chat message, not as a
+     * terminal mode, a sheet or a new screen. A final shell sentinel lets the
+     * monitor stop when the command actually completes.
+     */
     fun launchTerminal(command: String? = null) {
-        if (_terminalMode.value) {
-            if (!command.isNullOrBlank()) sendTerminalLine(command)
+        if (command.isNullOrBlank()) return
+        val convId=_currentId.value
+        if (_backgroundTaskRunning.value) {
+            edit(convId) { it.copy(messages=it.messages+UiMessage(role="assistant",
+                content="هناك مهمة Alpine قيد التشغيل. انتظر اكتمالها أو أوقفها قبل بدء مهمة ثانية.")) }
             return
         }
-        _terminalMode.value=true
+        _backgroundTaskRunning.value=true
         terminalReady=false
-        if (!command.isNullOrBlank()) queuedTerminalLines.addLast(command)
-        val convId=_currentId.value
-        val terminalMessage=UiMessage(role="terminal", content="```sh\nجاري تجهيز Alpine Linux...\n```")
+        queuedTerminalLines.clear()
+        val marker="__M4_TASK_DONE_"+UUID.randomUUID().toString().replace("-","")+"__"
+        val decorated=command+"; printf '\\n"+marker+":%s\\n' \"$?\""
+        val terminalMessage=UiMessage(role="terminal",
+            content="\`\`\`sh\\n⏳ جاري تجهيز Alpine Linux وتشغيل المهمة...\\n\`\`\`")
         liveTerminalMessageId=terminalMessage.id
-        edit(convId) { it.copy(messages=it.messages + terminalMessage) }
+        edit(convId) { it.copy(messages=it.messages+terminalMessage) }
         terminalMonitorJob?.cancel()
         terminalMonitorJob=viewModelScope.launch {
             try {
                 inChatTerminal.connect()
                 terminalReady=true
-                while (queuedTerminalLines.isNotEmpty()) {
-                    sendTerminalLine(queuedTerminalLines.removeFirst())
-                }
+                if (command.startsWith("m4-agent-start ")) inChatTerminal.configureAgent(selected.id)
+                // New run must not inherit the previous interactive terminal screen.
+                inChatTerminal.writeLine("clear")
+                inChatTerminal.writeLine(decorated)
                 var lastScreen=""
-                while (isActive && _terminalMode.value) {
+                val completed=Regex("(?m)^"+Regex.escape(marker)+":([0-9]+)\\s*$")
+                while (isActive && _backgroundTaskRunning.value) {
                     val screen=inChatTerminal.screen()
-                    if (screen!=lastScreen) {
-                        lastScreen=screen
-                        val formatted="```sh\n"+screen+"\n```"
+                    val status=completed.find(screen)
+                    val display=screen.replace(completed,"").trimEnd().takeLast(6500)
+                    if (display!=lastScreen || status!=null) {
+                        lastScreen=display
+                        val header=when {
+                            status==null -> "⏳ تنفيذ Alpine جارٍ..."
+                            status.groupValues[1]=="0" -> "✅ انتهى التنفيذ (exit 0)"
+                            else -> "⚠️ انتهى التنفيذ (exit "+status.groupValues[1]+")"
+                        }
+                        val formatted=header+"\\n\`\`\`sh\\n"+display+"\\n\`\`\`"
                         edit(convId) { conv -> conv.copy(messages=conv.messages.map {
-                            if (it.id==liveTerminalMessageId) it.copy(content=formatted) else it
+                            if (it.id==terminalMessage.id) it.copy(content=formatted) else it
                         }) }
                     }
-                    delay(280)
+                    if (status!=null) {
+                        _backgroundTaskRunning.value=false
+                        break
+                    }
+                    delay(250)
                 }
             } catch (_: CancellationException) {
-                // Leaving terminal mode is not a PTY error.
+                // The user cancelled the task.
             } catch (e: Exception) {
                 edit(convId) { conv -> conv.copy(messages=conv.messages.map {
-                    if (it.id==liveTerminalMessageId)
-                        it.copy(content="تعذّرت الطرفية الفعلية: "+(e.message?:"خطأ غير معروف"))
+                    if (it.id==terminalMessage.id)
+                        it.copy(content="تعذّر تنفيذ Alpine: "+(e.message?:"خطأ غير معروف"))
                     else it
                 }) }
-                _terminalMode.value=false
             } finally {
+                terminalReady=false
+                queuedTerminalLines.clear()
+                _backgroundTaskRunning.value=false
+                liveTerminalMessageId=null
                 saveHistory()
             }
         }
     }
 
-    fun leaveTerminal() {
-        _terminalMode.value=false
-        terminalReady=false
-        queuedTerminalLines.clear()
-        liveTerminalMessageId=null
+    fun stopBackgroundTask() {
+        if (!_backgroundTaskRunning.value) return
+        inChatTerminal.sendControl("\\u0003")
         terminalMonitorJob?.cancel()
         terminalMonitorJob=null
+        _backgroundTaskRunning.value=false
+        terminalReady=false
+        queuedTerminalLines.clear()
         saveHistory()
     }
-
-    fun terminalControl(raw: String) { inChatTerminal.sendControl(raw) }
 
     val selected: Provider get() = _providers.value[_providerIndex.value]
 
@@ -204,7 +229,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun newChat() {
         if (_streaming.value) return
-        leaveTerminal()
         val c = Conversation()
         _conversations.value = listOf(c) + _conversations.value
         _currentId.value = c.id
@@ -212,7 +236,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun select(id: String) {
         if (_streaming.value) return
-        if (id != _currentId.value) leaveTerminal()
         if (_conversations.value.any { it.id == id }) _currentId.value = id
     }
     fun stop() {
@@ -234,20 +257,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val cmd=clean.removePrefix("!").trim()
             if (cmd.isNotBlank()) {
                 val id=_currentId.value
-                edit(id) { it.copy(messages=it.messages + UiMessage(role="user",content=clean)) }
-                launchTerminal(cmd)
+                edit(id) { it.copy(messages=it.messages+
+                    UiMessage(role="user",content=clean)) }
+                if (_backgroundTaskRunning.value) {
+                    // Explicit ! input is passed to the running interactive PTY.
+                    if (terminalReady) inChatTerminal.writeLine(cmd)
+                    else sendTerminalLine(cmd)
+                } else launchTerminal(cmd)
             }
-            return
-        }
-        if (_terminalMode.value) {
-            val id=_currentId.value
-            val terminalReply=UiMessage(role="terminal",content="```sh\nجاري تنفيذ الأمر...\n```")
-            liveTerminalMessageId=terminalReply.id
-            edit(id) { it.copy(messages=it.messages + UiMessage(role="user",content=clean) +
-                terminalReply) }
-            try { sendTerminalLine(clean) }
-            catch (e: Exception) { edit(id) { it.copy(messages=it.messages +
-                UiMessage(role="assistant",content="خطأ في الطرفية: "+e.message.orEmpty())) } }
             return
         }
         val convId = _currentId.value
@@ -355,7 +372,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         stop()
-        leaveTerminal()
+        stopBackgroundTask()
         inChatTerminal.disconnect()
         super.onCleared()
     }
