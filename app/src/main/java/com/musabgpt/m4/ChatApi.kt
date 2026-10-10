@@ -39,6 +39,11 @@ object ChatApi {
         put(tool("open_app","Open an installed Android application using the Arabic Terminal's Android launcher. Pass the visible application name.",
             JSONObject().put("type","object").put("properties",JSONObject()
                 .put("name",JSONObject().put("type","string"))).put("required",JSONArray().put("name"))))
+        put(tool("prepare_whatsapp_draft","Open a reviewable WhatsApp draft for an explicitly named recipient and message. User presses Send in WhatsApp.",
+            JSONObject().put("type","object").put("properties",JSONObject()
+                .put("recipient",JSONObject().put("type","string"))
+                .put("message",JSONObject().put("type","string")))
+                .put("required",JSONArray().put("recipient").put("message"))))
         put(tool("list_apps","List installed Android apps that have a launcher icon.",
             JSONObject().put("type","object").put("properties",JSONObject())))
         put(tool("terminal_command","Run a real command in M4's embedded Alpine PTY, after a visible user confirmation. Never use to read credentials.",
@@ -284,7 +289,7 @@ object ChatApi {
             val rawCalls=JSONArray()
             for((index,part) in toolparts) {
                 val name=part.name.toString()
-                if(name !in listOf("open_app","list_apps","github_status","github_connect","terminal_command"))continue
+                if(name !in listOf("open_app","list_apps","github_status","github_connect","terminal_command","prepare_whatsapp_draft"))continue
                 val args=try { JSONObject(part.args.toString().ifEmpty { "{}" }) }
                     catch(_:Exception){JSONObject()}
                 val id=part.id.toString().ifEmpty { "m4-tool-"+index }
