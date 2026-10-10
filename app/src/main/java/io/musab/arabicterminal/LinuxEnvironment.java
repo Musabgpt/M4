@@ -31,7 +31,7 @@ public final class LinuxEnvironment {
         return new File(libs,"libproot.so").isFile() &&
             new File(libs,"libproot-loader.so").isFile();
     }
-    public static void install(Context c)throws Exception {
+    public static synchronized void install(Context c)throws Exception {
         File runtimeMarker=new File(rootfs(c),".arabicterminal-installed");
         boolean currentRuntime=false;
         try{
