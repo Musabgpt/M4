@@ -201,14 +201,8 @@ public final class TerminalService extends Service {
             // A child sh -c would normally lose 'cd' between tool calls.
             // Save PWD inside the guest after each completed command and restore
             // it on the next invocation in the same private Alpine workspace.
-            String script="if [ -f "+shellQuote(cwdPath)+" ]; then "+
-                "_m4_cwd=$(cat "+shellQuote(cwdPath)+"); "+
-                "cd \"$_m4_cwd\" 2>/dev/null || cd /root; "+
-                "else cd /root; fi\n"+
-                command+"\n"+
-                "_m4_exit=$?\n"+
-                "pwd -P > "+shellQuote(cwdPath)+"\n"+
-                "printf '%s' \"$_m4_exit\" > "+shellQuote(path+".exit")+"\n";
+            String script=TerminalCommandProtocol.wrap(command,cwdPath,
+                path+".exit","/root");
             String statement="sh -c "+shellQuote(script)+
                 " > "+shellQuote(path+".out")+" 2>&1\n";
             write(agentSession,statement);
@@ -257,10 +251,12 @@ public final class TerminalService extends Service {
             stream.seek(offset);
             int count=stream.read(bytes);
             if(count<=0)return 0;
-            String text=new String(bytes,0,count,StandardCharsets.UTF_8);
+            int complete=Utf8ChunkReader.completePrefix(bytes,count);
+            if(complete==0)return 0; // wait for the remaining UTF-8 bytes
+            String text=new String(bytes,0,complete,StandardCharsets.UTF_8);
             into.append(text);
             onOutput.accept(text);
-            return count;
+            return complete;
         }
     }
     private static String shellQuote(String value){
