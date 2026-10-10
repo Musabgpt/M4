@@ -176,7 +176,7 @@ public final class TerminalService extends Service {
         if(command==null || command.isEmpty() || command.length()>4000 ||
                 command.indexOf('\u0000')>=0)
             throw new IOException("Invalid terminal command");
-        int seconds=Math.max(2,Math.min(60,timeoutSeconds));
+        int seconds=Math.max(2,Math.min(180,timeoutSeconds));
         synchronized(toolLock){
             cancelAgentRequested=false;
             boolean aborted=false;
