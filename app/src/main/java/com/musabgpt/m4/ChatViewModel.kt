@@ -7,6 +7,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -16,7 +18,6 @@ import java.util.UUID
 
 /** Visible user approval is mandatory for arbitrary model-issued shell commands. */
 data class ToolApproval(val command: String, val decision: CompletableDeferred<Boolean>)
-data class TerminalLaunch(val id: String = UUID.randomUUID().toString(), val command: String?)
 
 data class UiMessage(
     val id: String = UUID.randomUUID().toString(),
@@ -55,20 +56,73 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val streaming = _streaming.asStateFlow()
     private var job: Job? = null
     private val nativeTools=M4NativeTools(app)
+    private val inChatTerminal=InChatTerminal(app)
+    private val _terminalMode=MutableStateFlow(false)
+    val terminalMode=_terminalMode.asStateFlow()
+    private var terminalMonitorJob: Job?=null
     private val prompt by lazy {
         app.assets.open("m4-chat-system.txt").bufferedReader(Charsets.UTF_8).use { it.readText() }
     }
     private val _approval=MutableStateFlow<ToolApproval?>(null)
     val approval=_approval.asStateFlow()
-    private val _terminalLaunch=MutableStateFlow<TerminalLaunch?>(null)
-    val terminalLaunch=_terminalLaunch.asStateFlow()
     private val _terminalOutput=MutableStateFlow("")
     val terminalOutput=_terminalOutput.asStateFlow()
     private var taskApprovedCommands=0
-    fun launchTerminal(command: String? = null) { _terminalLaunch.value=TerminalLaunch(command=command) }
-    fun consumeTerminalLaunch(id: String) {
-        if(_terminalLaunch.value?.id==id) _terminalLaunch.value=null
+    /** One Activity, one transcript, one composer: interactive Alpine lives in chat. */
+    fun launchTerminal(command: String? = null) {
+        if (_terminalMode.value) {
+            if (!command.isNullOrBlank()) {
+                if (command.startsWith("m4-agent-start ")) inChatTerminal.configureAgent(selected.id)
+                inChatTerminal.writeLine(command)
+            }
+            return
+        }
+        _terminalMode.value=true
+        val convId=_currentId.value
+        val terminalMessage=UiMessage(role="terminal", content="\`\`\`sh\nجاري تجهيز Alpine Linux...\n\`\`\`")
+        edit(convId) { it.copy(messages=it.messages + terminalMessage) }
+        terminalMonitorJob?.cancel()
+        terminalMonitorJob=viewModelScope.launch {
+            try {
+                inChatTerminal.connect()
+                if (!command.isNullOrBlank()) {
+                    if (command.startsWith("m4-agent-start ")) inChatTerminal.configureAgent(selected.id)
+                    inChatTerminal.writeLine(command)
+                }
+                var lastScreen=""
+                while (isActive && _terminalMode.value) {
+                    val screen=inChatTerminal.screen()
+                    if (screen!=lastScreen) {
+                        lastScreen=screen
+                        val formatted="\`\`\`sh\n"+screen+"\n\`\`\`"
+                        edit(convId) { conv -> conv.copy(messages=conv.messages.map {
+                            if (it.id==terminalMessage.id) it.copy(content=formatted) else it
+                        }) }
+                    }
+                    delay(280)
+                }
+            } catch (e: Exception) {
+                edit(convId) { conv -> conv.copy(messages=conv.messages.map {
+                    if (it.id==terminalMessage.id)
+                        it.copy(content="تعذّرت الطرفية الفعلية: "+(e.message?:"خطأ غير معروف"))
+                    else it
+                }) }
+                _terminalMode.value=false
+            } finally {
+                saveHistory()
+            }
+        }
     }
+
+    fun leaveTerminal() {
+        _terminalMode.value=false
+        terminalMonitorJob?.cancel()
+        terminalMonitorJob=null
+        saveHistory()
+    }
+
+    fun terminalControl(raw: String) { inChatTerminal.sendControl(raw) }
+
     val selected: Provider get() = _providers.value[_providerIndex.value]
 
     fun decideTool(approved: Boolean, approveTask: Boolean = false) {
@@ -116,6 +170,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun newChat() {
         if (_streaming.value) return
+        leaveTerminal()
         val c = Conversation()
         _conversations.value = listOf(c) + _conversations.value
         _currentId.value = c.id
@@ -123,6 +178,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun select(id: String) {
         if (_streaming.value) return
+        if (id != _currentId.value) leaveTerminal()
         if (_conversations.value.any { it.id == id }) _currentId.value = id
     }
     fun stop() {
@@ -140,6 +196,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String) {
         val clean = text.trim()
         if (clean.isEmpty() || _streaming.value) return
+        if (clean.startsWith("!")) {
+            val cmd=clean.removePrefix("!").trim()
+            if (cmd.isNotBlank()) {
+                val id=_currentId.value
+                edit(id) { it.copy(messages=it.messages + UiMessage(role="user",content=clean)) }
+                launchTerminal(cmd)
+            }
+            return
+        }
+        if (_terminalMode.value) {
+            val id=_currentId.value
+            edit(id) { it.copy(messages=it.messages + UiMessage(role="user",content=clean)) }
+            try { inChatTerminal.writeLine(clean) }
+            catch (e: Exception) { edit(id) { it.copy(messages=it.messages +
+                UiMessage(role="assistant",content="خطأ في الطرفية: "+e.message.orEmpty())) } }
+            return
+        }
         val convId = _currentId.value
         val reply = UiMessage(role = "assistant", content = "")
         edit(convId) { c ->
@@ -234,6 +307,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         stop()
+        leaveTerminal()
+        inChatTerminal.disconnect()
         super.onCleared()
     }
 }
