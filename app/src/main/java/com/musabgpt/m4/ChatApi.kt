@@ -11,17 +11,12 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 data class ChatMessage(val role: String, val content: String)
-data class Provider(
-    val name: String,
-    val baseUrl: String,
-    val model: String,
-    val apiKey: String = ""
-)
+sealed interface ChatEvent {
+    data class Text(val value: String) : ChatEvent
+    data class Route(val name: String) : ChatEvent
+}
 
-/**
- * NewAl-Cloud inspired provider routing with first-party Compose presentation.
- * Free providers have no guarantee of uptime, tool calls or unlimited quotas.
- */
+/** Bounded, keyless streaming router. Never sends API credentials and never follows redirects. */
 object ChatApi {
     @Volatile private var connection: HttpURLConnection? = null
     @Volatile private var stopped = false
@@ -31,61 +26,66 @@ object ChatApi {
         connection?.disconnect()
     }
 
-    fun stream(providers: List<Provider>, history: List<ChatMessage>): Flow<String> = flow {
+    fun stream(selected: Provider, history: List<ChatMessage>): Flow<ChatEvent> = flow {
         stopped = false
-        val configured = providers.filter { it.name == "Kilo Auto Free" || it.apiKey.isNotBlank() }
-        if (configured.isEmpty()) throw IllegalStateException("أضف مفتاح API أو استخدم النموذج المجاني")
-        var error: Exception? = null
-        for (provider in configured) {
+        var lastError = "المسارات المجانية غير متاحة"
+        for (route in ProviderCatalog.routingOrder(selected)) {
             var emitted = false
             try {
-                val base = provider.baseUrl.trimEnd('/')
-                val endpoint = if (base.endsWith("/chat/completions")) base else base + "/chat/completions"
-                val uri = URL(endpoint)
-                val local = uri.host == "127.0.0.1" || uri.host == "localhost"
-                if (uri.protocol != "https" && !(local && uri.protocol == "http")) {
-                    throw IllegalArgumentException("يتطلب HTTPS أو خادم محلي موثوق")
+                val base = URL(route.baseUrl)
+                val loopback = base.host == "127.0.0.1" || base.host == "localhost"
+                require(
+                    (base.protocol == "https" && !route.localService) ||
+                        (base.protocol == "http" && loopback && route.localService)
+                ) { "غير مسموح الاتصال بعنوان غير آمن" }
+                require(base.userInfo == null && base.ref == null && base.query == null) {
+                    "عنوان بوابة غير صالح"
                 }
+                val endpoint = URL(route.baseUrl.trimEnd('/') + "/chat/completions")
                 val messages = JSONArray().put(JSONObject()
                     .put("role", "system")
-                    .put("content", "You are MusabAI, a careful programming assistant. Reply in the user's language. Do not claim that code ran without evidence."))
-                history.forEach { m ->
-                    messages.put(JSONObject().put("role", m.role).put("content", m.content))
+                    .put("content", "You are M4 MusabAI, a careful Arabic-friendly coding assistant. You can propose code but cannot claim to execute it from chat. Execution uses the Arabic terminal after explicit user confirmation. Do not invent test results."))
+                history.takeLast(32).forEach { m ->
+                    if (m.role == "user" || m.role == "assistant") {
+                        messages.put(JSONObject().put("role", m.role)
+                            .put("content", m.content.take(16000)))
+                    }
                 }
-                val body = JSONObject()
-                    .put("model", provider.model)
+                val payload = JSONObject()
+                    .put("model", route.model)
                     .put("messages", messages)
-                    .put("stream", true)
-                val c = uri.openConnection() as HttpURLConnection
+                    .put("stream", true).toString().toByteArray(Charsets.UTF_8)
+                val c = endpoint.openConnection() as HttpURLConnection
                 connection = c
                 try {
                     c.instanceFollowRedirects = false
                     c.requestMethod = "POST"
                     c.doOutput = true
-                    c.connectTimeout = 15_000
-                    c.readTimeout = 75_000
+                    c.connectTimeout = if (route.localService) 2000 else 10000
+                    c.readTimeout = 45000
                     c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                     c.setRequestProperty("Accept", "text/event-stream")
-                    if (provider.apiKey.isNotBlank()) c.setRequestProperty("Authorization", "Bearer " + provider.apiKey)
-                    c.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                    c.outputStream.use { it.write(payload) }
                     if (c.responseCode !in 200..299) {
-                        val response = c.errorStream?.bufferedReader()?.use { it.readText().take(450) } ?: ""
-                        throw IllegalStateException("HTTP " + c.responseCode + " (" + provider.name + ") " + response)
+                        val code = c.responseCode
+                        throw IllegalStateException(route.name + " HTTP " + code)
                     }
+                    var totalChars = 0
                     c.inputStream.bufferedReader().use { reader ->
-                        while (!stopped) {
+                        while (!stopped && totalChars < 100000) {
                             val line = reader.readLine() ?: break
                             if (!line.startsWith("data:")) continue
-                            val data = line.substringAfter("data:").trim()
-                            if (data == "[DONE]") break
-                            val item = try { JSONObject(data) } catch (_: Exception) { continue }
-                            val choices = item.optJSONArray("choices") ?: continue
-                            if (choices.length() == 0) continue
-                            val delta = choices.optJSONObject(0)?.optJSONObject("delta")
+                            val part = line.substring(5).trim()
+                            if (part == "[DONE]") break
+                            val item = try { JSONObject(part) } catch (_: Exception) { continue }
+                            val choice = item.optJSONArray("choices")?.optJSONObject(0) ?: continue
+                            val delta = choice.optJSONObject("delta")
                             val token = delta?.optString("content", "") ?: ""
                             if (token.isNotEmpty()) {
+                                if (!emitted) emit(ChatEvent.Route(route.name))
                                 emitted = true
-                                emit(token)
+                                totalChars += token.length
+                                emit(ChatEvent.Text(token))
                             }
                         }
                     }
@@ -93,17 +93,18 @@ object ChatApi {
                     c.disconnect()
                     connection = null
                 }
-                if (stopped) throw CancellationException("تم إيقاف المحادثة")
+                if (stopped) throw CancellationException("تم إيقاف الإجابة")
                 if (emitted) return@flow
-                throw IllegalStateException("رد فارغ من " + provider.name)
-            } catch (cancel: CancellationException) {
-                throw cancel
+                throw IllegalStateException(route.name + ": استجابة فارغة")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (stopped) throw CancellationException("تم الإيقاف")
-                if (emitted) throw e // Never splice two providers into one answer.
-                error = e
+                // Do not splice different models together after any partial answer.
+                if (emitted) throw e
+                lastError = (e.message ?: route.name + ": تعذّر الاتصال").take(240)
             }
         }
-        throw IllegalStateException(error?.message ?: "لا يوجد مزود متاح حالياً")
+        throw IllegalStateException("تعذر الوصول إلى البوابات: " + lastError)
     }.flowOn(Dispatchers.IO)
 }

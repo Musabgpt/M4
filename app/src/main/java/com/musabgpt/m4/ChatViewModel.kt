@@ -25,23 +25,22 @@ data class Conversation(
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("m4_chats", 0)
-    private val _providers = MutableStateFlow(listOf(
-        Provider("Kilo Auto Free", "https://api.kilo.ai/api/gateway", "kilo-auto/free"),
-        Provider("Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
-        Provider("Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.5-flash"),
-        Provider("OpenRouter", "https://openrouter.ai/api/v1", "meta-llama/llama-3.3-70b-instruct:free"),
-        Provider("Custom", "https://example.com/v1", "your-model")
-    ).map {
-        it.copy(
-            baseUrl = prefs.getString("url_" + it.name, it.baseUrl) ?: it.baseUrl,
-            model = prefs.getString("model_" + it.name, it.model) ?: it.model,
-            apiKey = prefs.getString("key_" + it.name, "") ?: ""
-        )
-    })
+    // Four built-in source families only. No local model import, custom API or keys.
+    private val _providers = MutableStateFlow(ProviderCatalog.all)
     val providers = _providers.asStateFlow()
-
-    private val _providerIndex = MutableStateFlow(prefs.getInt("provider", 0).coerceIn(0, 4))
+    private val _providerIndex = MutableStateFlow(prefs.getInt("provider", 0)
+        .coerceIn(0, ProviderCatalog.all.lastIndex))
     val providerIndex = _providerIndex.asStateFlow()
+    private val _activeRoute = MutableStateFlow("")
+    val activeRoute = _activeRoute.asStateFlow()
+    init {
+        // Legacy configuration has no meaning and may contain old API secrets.
+        val editor = prefs.edit()
+        for (old in listOf("Kilo Auto Free", "Groq", "Gemini", "OpenRouter", "Custom")) {
+            editor.remove("url_" + old).remove("model_" + old).remove("key_" + old)
+        }
+        editor.apply()
+    }
     private val _conversations = MutableStateFlow(restoreConversations())
     val conversations = _conversations.asStateFlow()
     private val _currentId = MutableStateFlow(_conversations.value.first().id)
@@ -87,22 +86,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putInt("provider", index).apply()
     }
 
-    fun configureProvider(index: Int, url: String, model: String, key: String) {
-        if (_streaming.value || index !in _providers.value.indices) return
-        val safeUrl = url.trim()
-        if (!safeUrl.startsWith("https://") && !safeUrl.startsWith("http://127.0.0.1:")) return
-        if (model.isBlank() || model.length > 256) return
-        _providers.value = _providers.value.mapIndexed { i, old ->
-            if (i == index) old.copy(baseUrl = safeUrl, model = model.trim(), apiKey = key.trim()) else old
-        }
-        // MODE_PRIVATE, local only; keys are never committed to GitHub.
-        prefs.edit()
-            .putString("key_" + _providers.value[index].name, key.trim())
-            .putString("url_" + _providers.value[index].name, safeUrl)
-            .putString("model_" + _providers.value[index].name, model.trim())
-            .apply()
-    }
-
     fun newChat() {
         if (_streaming.value) return
         val c = Conversation()
@@ -136,15 +119,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val conv = _conversations.value.first { it.id == convId }
         val history = conv.messages.dropLast(1).map { ChatMessage(it.role, it.content) }
         val primary = selected
-        val fallback = _providers.value.filter { it != primary && it.apiKey.isNotBlank() }
+        _activeRoute.value = ""
         _streaming.value = true
         job = viewModelScope.launch {
             try {
-                ChatApi.stream(listOf(primary) + fallback, history).collect { token ->
-                    edit(convId) { c ->
-                        c.copy(messages = c.messages.map {
-                            if (it.id == reply.id) it.copy(content = it.content + token) else it
-                        })
+                ChatApi.stream(primary, history).collect { event ->
+                    when (event) {
+                        is ChatEvent.Route -> _activeRoute.value = "الاستجابة عبر: " + event.name
+                        is ChatEvent.Text -> edit(convId) { c ->
+                            c.copy(messages = c.messages.map {
+                                if (it.id == reply.id) it.copy(content = it.content + event.value) else it
+                            })
+                        }
                     }
                 }
             } catch (cancel: CancellationException) {
