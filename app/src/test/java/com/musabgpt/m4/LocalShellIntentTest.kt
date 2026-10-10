@@ -16,7 +16,12 @@ class LocalShellIntentTest {
     }
 
     @Test fun compoundWhatsAppMessageMustNotBeAShellOrApplicationName() {
-        val action=M4NativeTools.quickAction("افتح واتساب وابعت رسالة مرحبا الى مروة")
-        assertTrue(action?.startsWith("whatsapp_draft:")==true)
+        // Pure JVM Android tests cannot call Android's unmocked org.json.JSONObject.put.
+        // Check the real local parser here; end-to-end action serialization needs instrumentation.
+        val task=WhatsAppPlanner.parse("افتح واتساب وابعت رسالة مرحبا الى مروة")
+        assertEquals("مروة",task?.recipient)
+        assertEquals("مرحبا",task?.body)
+        assertTrue(WhatsAppPlanner.looksLikeMessageRequest(
+            "افتح واتساب وابعت رسالة مرحبا الى مروة"))
     }
 }
