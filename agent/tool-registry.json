@@ -1,0 +1,98 @@
+[
+  {
+    "name": "Python 3",
+    "binary": "python3",
+    "purpose": "Coding agent runtime",
+    "install": "bundled"
+  },
+  {
+    "name": "Node.js/npm",
+    "binary": "node",
+    "purpose": "JavaScript/TypeScript tooling",
+    "install": "bundled"
+  },
+  {
+    "name": "Git",
+    "binary": "git",
+    "purpose": "Version control",
+    "install": "bundled"
+  },
+  {
+    "name": "tmux",
+    "binary": "tmux",
+    "purpose": "Persistent terminal sessions",
+    "install": "bundled"
+  },
+  {
+    "name": "ripgrep",
+    "binary": "rg",
+    "purpose": "Fast code search",
+    "install": "bundled"
+  },
+  {
+    "name": "GitHub CLI",
+    "binary": "gh",
+    "purpose": "GitHub PRs and Actions",
+    "install": "bundled when Alpine package is available; check with term-agent tools"
+  },
+  {
+    "name": "Pi coding agent",
+    "binary": "pi",
+    "purpose": "Extensible agent and supported adapters",
+    "install": "term-agent-addons pi"
+  },
+  {
+    "name": "Ralph for Pi",
+    "binary": "pi",
+    "purpose": "Long development loops; check inside Pi",
+    "install": "term-agent-addons ralph"
+  },
+  {
+    "name": "pytest",
+    "binary": "pytest",
+    "purpose": "Python tests",
+    "install": "bundled"
+  },
+  {
+    "name": "Vitest",
+    "binary": "vitest",
+    "purpose": "JavaScript tests",
+    "install": "npm install --save-dev vitest"
+  },
+  {
+    "name": "ESLint",
+    "binary": "eslint",
+    "purpose": "Lint JavaScript",
+    "install": "npm install --save-dev eslint"
+  },
+  {
+    "name": "Tree-sitter",
+    "binary": "tree-sitter",
+    "purpose": "Code syntax parser",
+    "install": "bundled when Alpine package is available; check with term-agent tools"
+  },
+  {
+    "name": "ast-grep",
+    "binary": "ast-grep",
+    "purpose": "Structural search and refactoring",
+    "install": "bundled when Alpine package is available; check with term-agent tools"
+  },
+  {
+    "name": "MCP servers",
+    "binary": "pi",
+    "purpose": "External services via compatible Pi adapters",
+    "install": "Install/enable trusted MCP adapter for Pi"
+  },
+  {
+    "name": "GitHub Actions",
+    "binary": "git",
+    "purpose": "Remote APK build and CI",
+    "install": "configured in repository"
+  },
+  {
+    "name": "Watchdog loop",
+    "binary": "term-agent-watch",
+    "purpose": "Resumable bounded coding loop",
+    "install": "bundled"
+  }
+]

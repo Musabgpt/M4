@@ -1,0 +1,90 @@
+name: بناء الطرفية العربية APK
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: قراءة الشيفرة
+        uses: actions/checkout@v4
+      - name: تثبيت Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: أدوات البناء الأصلية
+        run: |
+          SDKMANAGER="$(find "${ANDROID_HOME}/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1'
+      - name: اختبار وكيل البرمجة والاستمرارية والأمان
+        run: |
+          python3 -m unittest discover -s agent_tests -v
+          python3 -m py_compile agent/agent.py agent/newal/continuity.py agent/newal/task_state.py
+          bash -n agent/term-agent.sh agent/term-agent-addons.sh agent/term-agent-watch.sh
+      - name: تضمين Alpine Linux وPRoot بالتحقق من البصمات
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq patchelf
+          python3 -m py_compile scripts/fetch-linux.py
+          bash -n scripts/bundle-linux.sh
+          bash scripts/bundle-linux.sh
+      - name: فحص أدوات لينكس المدمجة
+        run: |
+          test -s app/src/main/assets/alpine-rootfs.tgz
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/python3'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/git'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/node'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/npm'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/term-agent'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/term-agent/agent.py'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/term-agent-watch'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/pytest'
+      - name: تثبيت Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: اختبارات المحرك والأوامر العربية
+        run: |
+          mkdir -p tests/out
+          javac -encoding UTF-8 -d tests/out \
+            app/src/main/java/io/musab/arabicterminal/ArabicCommandRouter.java \
+            app/src/main/java/io/musab/arabicterminal/TerminalScreen.java \
+            app/src/main/java/io/musab/arabicterminal/CommandBatch.java \
+            app/src/main/java/io/musab/arabicterminal/PackageCommands.java \
+            app/src/main/java/io/musab/arabicterminal/RootArchive.java \
+            app/src/main/java/io/musab/arabicterminal/RootArchiveImporter.java \
+            app/src/main/java/io/musab/arabicterminal/ArchiveVerifier.java \
+            app/src/main/java/io/musab/arabicterminal/SafeFileImporter.java \
+            tests/Checks.java tests/DeviceCommandsTest.java tests/CommandBatchTest.java tests/PackageCommandsTest.java tests/RootArchiveTest.java tests/ArchiveVerifierTest.java tests/SafeFileImporterTest.java tests/RootArchiveImporterTest.java
+          java -cp tests/out Checks
+          java -cp tests/out DeviceCommandsTest
+          java -cp tests/out CommandBatchTest
+          java -cp tests/out PackageCommandsTest
+          java -cp tests/out RootArchiveTest
+          java -cp tests/out ArchiveVerifierTest
+          java -cp tests/out SafeFileImporterTest
+          java -cp tests/out RootArchiveImporterTest
+      - name: بناء APK عبر Android SDK وNDK
+        run: gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug
+      - name: تحقق من توقيع وبصمة APK
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          sha256sum "$APK" | tee "$APK.sha256"
+      - name: إيداع APK قابل للتثبيت
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArabicTerminal-debug-APK
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/app-debug.apk.sha256
+          if-no-files-found: error
