@@ -135,6 +135,15 @@ class ChatBridgeContract(unittest.TestCase):
         self.assertIn("requiresRealTools",api)
         self.assertIn("toolCallsExecuted==0",api)
 
+    def test_local_arabic_shell_is_real_and_approval_gated(self):
+        bridge=read(KT/"M4NativeTools.kt")
+        vm=read(KT/"ChatViewModel.kt")
+        self.assertIn('return "shell:" + parsed.command',bridge)
+        self.assertIn('if(quick.startsWith("shell:"))',vm)
+        self.assertIn('nativeTools.execute("terminal_command"',vm)
+        self.assertIn('appendOutput(chunk)',vm)
+        self.assertIn('ToolApproval(command,decision)',vm)
+
     def test_only_main_push_workflow_generates_apk(self):
         android=read(ROOT/".github/workflows/android.yml")
         kotlin=read(ROOT/".github/workflows/m4-kotlin.yml")

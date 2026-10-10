@@ -42,6 +42,9 @@ class M4NativeTools(private val app: Application) {
                     "وصل github", "ربط جيت هاب", "اربط جيت هاب",
                     "connect github", "github login")) return "github_connect"
             val parsed = ArabicCommandRouter.parse(cleaned)
+            if (parsed.kind == ArabicCommandRouter.Kind.SHELL &&
+                cleaned.firstOrNull()?.let { it in '\u0600'..'\u06FF' } == true)
+                return "shell:" + parsed.command
             return when (parsed.kind) {
                 ArabicCommandRouter.Kind.OPEN_APP,
                 ArabicCommandRouter.Kind.OPEN_SYSTEM_APP,
@@ -55,6 +58,7 @@ class M4NativeTools(private val app: Application) {
 
     suspend fun performQuick(action: String): String = withContext(Dispatchers.Main) {
         if (action == "github_connect") return@withContext githubConnect()
+        if (action.startsWith("shell:")) return@withContext "يتطلب أمر Linux موافقة منفصلة."
         if (action == "whatsapp_unparsed") return@withContext "هذا طلب رسالة واتساب، وليس اسم تطبيق. أحتاج نص الرسالة واسم المستلم بوضوح؛ لم أرسل شيئًا."
         val whatsapp=WhatsAppPlanner.fromAction(action)
         if (whatsapp!=null) return@withContext PhoneController.prepareWhatsAppDraft(

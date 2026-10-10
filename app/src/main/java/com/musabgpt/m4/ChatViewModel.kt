@@ -294,6 +294,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         job=viewModelScope.launch {
             val buffer=StringBuilder()
             var lastFlush=0L
+            fun appendOutput(chunk: String) {
+                val limited=chunk.takeLast(1500)
+                if(limited.isBlank()) return
+                _terminalOutput.value=(_terminalOutput.value+limited).takeLast(8000)
+                val rendered="```sh\n"+_terminalOutput.value.replace("```","'''")+"\n```"
+                val id=toolLogMessageId
+                if(id==null) {
+                    val entry=UiMessage(role="terminal",content=rendered)
+                    toolLogMessageId=entry.id
+                    edit(convId) { it.copy(messages=it.messages+entry) }
+                } else edit(convId) { c -> c.copy(messages=c.messages.map {
+                    if(it.id==id) it.copy(content=rendered) else it
+                }) }
+                _activeRoute.value="Alpine: "+limited.takeLast(80).replace("\n"," ")
+            }
             fun flush() {
                 if(buffer.isEmpty())return
                 val portion=buffer.toString()
@@ -305,7 +320,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             try {
                 if(quick!=null) {
-                    if(quick=="github_connect") {
+                    if(quick.startsWith("shell:")) {
+                        val command=quick.removePrefix("shell:")
+                        val decision=CompletableDeferred<Boolean>()
+                        _approval.value=ToolApproval(command,decision)
+                        val allowed=try { withTimeout(120000) { decision.await() } }
+                            finally { _approval.value=null }
+                        if(!allowed) buffer.append("رفض المستخدم تنفيذ أمر Alpine المحلي.")
+                        else buffer.append(nativeTools.execute("terminal_command",
+                            JSONObject().put("command",command),clean,true) { chunk ->
+                            appendOutput(chunk)
+                        })
+                    } else if(quick=="github_connect") {
                         launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
                         buffer.append("بدأت عملية ربط GitHub داخل المحادثة. لا يعتبر الحساب مرتبطًا حتى تؤكد نتيجة تسجيل الدخول الفعلية.")
                     } else if (quick.startsWith("whatsapp_draft:")) {
@@ -341,21 +367,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
                             "بدأ ربط GitHub عبر Alpine في المحادثة؛ لم يُتحقق من المصادقة بعد."
                         } else nativeTools.execute(call.name,call.arguments,clean,approved) { chunk ->
-                            // Genuine PTY stdout, captured while the command is running.
-                            val limited=chunk.takeLast(1500)
-                            if(limited.isNotBlank()) {
-                                _terminalOutput.value=(_terminalOutput.value+limited).takeLast(8000)
-                                val rendered="```sh\n"+_terminalOutput.value.replace("```","'''")+"\n```"
-                                val logId=toolLogMessageId
-                                if(logId==null) {
-                                    val entry=UiMessage(role="terminal", content=rendered)
-                                    toolLogMessageId=entry.id
-                                    edit(convId) { it.copy(messages=it.messages+entry) }
-                                } else edit(convId) { c -> c.copy(messages=c.messages.map {
-                                    if(it.id==logId) it.copy(content=rendered) else it
-                                }) }
-                                _activeRoute.value="Alpine: "+limited.takeLast(80).replace("\n"," ")
-                            }
+                            appendOutput(chunk)
                         }
                     }.collect { event ->
                         when(event) {
