@@ -44,3 +44,8 @@ The offline seed is a new local Git baseline, not a reproduction of the remote G
 ## v1.0.2 — Agent progress in Compose
 
 The chat app now has an **حالة الوكيل** (agent status) action. It reads the real app-private `/root/projects/M4/.term-agent/state.json` from the installed Alpine environment and displays the saved goal, phase, step count and verification summary. A manually triggered **استئناف** action can continue a task that paused at its iteration limit; active or blocked tasks are not automatically duplicated. The view is an on-demand snapshot with a Refresh button, not a claim of live backend streaming.
+
+
+## v2 update signing: exact NewAl-Cloud identity, fail-closed
+
+NewAl-Cloud's **last advanced persistent release** (run 37916175916, build 363) used package `dev.newal.code.lite.connectors` and verified SHA-256 signing certificate `6af53b6b3e2574eed16aaae7ce92ade3dcde702a74af1dfae994c9c87609cbb6`. M4's **release** variant targets that same package with versionCode 10000+; the separate debug variant has a distinct `.m4dev` package suffix and cannot overwrite the release. To produce an actual update, the owner must make the **original identical signing keystore** available as the GitHub Actions secret `MUSABAI_RELEASE_SIGNING_BUNDLE` in the M4 repository. The workflow reads it only in runner temporary storage, checks the signed APK's certificate against `android/signing-cert-sha256.txt`, and refuses to publish a mismatched build. A certificate fingerprint alone cannot sign an APK. Existing `dev.newal.code.lite` baseline apps and existing `com.musabgpt.m4` apps have *different package IDs* and therefore cannot be updated in place by this package; backups/migration would be needed. No release secret is copied from NewAl-Cloud automatically.

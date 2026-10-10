@@ -7,3 +7,12 @@ local.properties
 tests/out/
 .cxx/
 *.apk
+
+# Never commit signing credentials or artifacts
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+signing.properties
+release-output/

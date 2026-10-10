@@ -34,6 +34,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq patchelf
           python3 -m py_compile scripts/fetch-linux.py
+          bash -n scripts/build-signed-release.sh
           bash -n scripts/bundle-linux.sh
           bash scripts/bundle-linux.sh
       - name: فحص أدوات لينكس المدمجة
@@ -93,3 +94,29 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk.sha256
           if-no-files-found: error
+
+      - name: Detect original NewAl signing identity (M4 repository secret)
+        id: persistent_signing
+        env:
+          MUSABAI_RELEASE_SIGNING_BUNDLE: ${{ secrets.MUSABAI_RELEASE_SIGNING_BUNDLE }}
+        run: |
+          if [ -n "$MUSABAI_RELEASE_SIGNING_BUNDLE" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No original signing key in this repo: only separate-package development APK is available; no update-compatible release will be published."
+          fi
+      - name: Build update-compatible APK using original private signing key
+        if: steps.persistent_signing.outputs.available == 'true'
+        env:
+          MUSABAI_RELEASE_SIGNING_BUNDLE: ${{ secrets.MUSABAI_RELEASE_SIGNING_BUNDLE }}
+          M4_BUILD_NUMBER: ${{ github.run_number + 10000 }}
+        run: bash scripts/build-signed-release.sh
+      - name: Publish only verified same-certificate NewAl updates
+        if: steps.persistent_signing.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: M4-NewAl-Cloud-Signed-Update
+          path: release-output/
+          if-no-files-found: error
+          retention-days: 14
