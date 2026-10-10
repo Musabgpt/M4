@@ -55,6 +55,8 @@ import java.util.Locale;
 
 /** واجهة الطرفية العربية: جلسات PTY متعددة، شاشة ألوان، وأوامر تعمل محليًا. */
 public final class MainActivity extends Activity {
+    public static final String EXTRA_AGENT_GOAL = "com.musabgpt.m4.AGENT_GOAL";
+    private String pendingAgentGoal;
     private static final int BG=0xFF0B1422, PANEL=0xFF1C2A3C,
             ACCENT=0xFF54DCAD, FG=0xFFECF3FC, MUTED=0xFFB1C3D5;
     private static final int FILE_PICKER=2026, EXPORT_PICKER=2027, RESTORE_PICKER=2028, MAX_SESSIONS=6;
@@ -70,7 +72,14 @@ public final class MainActivity extends Activity {
             bound=true;sessions=service.sessions();active=service.selected();
             service.setListener(()->{if(service!=null){active=service.selected();render();}});
             if(sessions.isEmpty())prepareLinux();
-            else render();
+            else {
+                render();
+                if(pendingAgentGoal!=null){
+                    useLinux=true;
+                    createSession(false);
+                    launchAgentGoal();
+                }
+            }
         }
         @Override public void onServiceDisconnected(ComponentName name){
             service=null;bound=false;active=null;
@@ -89,7 +98,21 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
+        pendingAgentGoal=getIntent()==null?null:getIntent().getStringExtra(EXTRA_AGENT_GOAL);
         buildUi();
+    }
+    @Override protected void onNewIntent(Intent intent){
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String goal=intent==null?null:intent.getStringExtra(EXTRA_AGENT_GOAL);
+        if(goal!=null){
+            pendingAgentGoal=goal;
+            if(service!=null && LinuxEnvironment.installed(this)){
+                useLinux=true;
+                createSession(false);
+                launchAgentGoal();
+            }
+        }
     }
     @Override protected void onStart(){
         super.onStart();
@@ -258,6 +281,59 @@ public final class MainActivity extends Activity {
         });
         popup.show();
     }
+    private static String shellQuote(String text){
+        return "'" + text.replace("'", "'\\''") + "'";
+    }
+    /**
+     * Launch AI coding in the already integrated Alpine runtime, never using
+     * Termux or a privileged Android shell. Provider secrets are app-private.
+     */
+    private void launchAgentGoal(){
+        if(pendingAgentGoal==null || service==null || active==null || !active.linux)return;
+        String goal=pendingAgentGoal;
+        if(goal.trim().isEmpty() || goal.length()>6000){
+            pendingAgentGoal=null;
+            notice("هدف الوكيل فارغ أو طويل جداً");return;
+        }
+        try{
+            android.content.SharedPreferences prefs=getSharedPreferences("m4_chats",MODE_PRIVATE);
+            int index=prefs.getInt("provider",0);
+            String[] names={"Kilo Auto Free","Groq","Gemini","OpenRouter","Custom"};
+            String[] urls={"https://api.kilo.ai/api/gateway","https://api.groq.com/openai/v1",
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                "https://openrouter.ai/api/v1","https://example.com/v1"};
+            String[] models={"kilo-auto/free","llama-3.3-70b-versatile","gemini-2.5-flash",
+                "meta-llama/llama-3.3-70b-instruct:free","your-model"};
+            if(index<0 || index>=names.length)index=0;
+            String name=names[index];
+            String url=prefs.getString("url_"+name,urls[index]);
+            String model=prefs.getString("model_"+name,models[index]);
+            String key=prefs.getString("key_"+name,"");
+            if(url==null || !(url.startsWith("https://") || url.startsWith("http://127.0.0.1:")))
+                throw new IOException("عنوان API غير آمن");
+            if(model==null || model.isEmpty() || model.length()>256)
+                throw new IOException("معرّف النموذج غير صحيح");
+            File config=new File(LinuxEnvironment.rootfs(this),"root/.m4-agent");
+            if(!config.exists() && !config.mkdirs())throw new IOException("تعذّر تجهيز إعدادات الوكيل");
+            File destination=new File(config,"provider.env");
+            String body="export TERM_AGENT_API_BASE="+shellQuote(url)+"\n"+
+                        "export TERM_AGENT_MODEL="+shellQuote(model)+"\n"+
+                        "export TERM_AGENT_API_KEY="+shellQuote(key==null?"":key)+"\n";
+            java.nio.file.Files.write(destination.toPath(),body.getBytes(StandardCharsets.UTF_8));
+            destination.setReadable(false,false);
+            destination.setWritable(false,false);
+            destination.setReadable(true,true);
+            destination.setWritable(true,true);
+            pendingAgentGoal=null;
+            write(active,"mkdir -p /root/projects/M4 && cd /root/projects/M4 && "+
+                "term-agent init && . /root/.m4-agent/provider.env && "+
+                "term-agent run "+shellQuote(goal)+" --steps 40 --allow-exec\n");
+            notice("مهمة البرمجة بدأت في الطرفية. نجاح البناء والاختبارات مطلوب قبل إكمال المهمة. "+
+                   "إذا لم توجد اختبارات للمشروع استخدم term-agent check-add.");
+        }catch(Exception error){
+            notice("تعذّر تشغيل الوكيل: "+error.getMessage());
+        }
+    }
     private void prepareLinux(){
         if(service==null||preparingLinux)return;
         preparingLinux=true;
@@ -280,6 +356,7 @@ public final class MainActivity extends Activity {
                     useLinux=true;
                     createSession(false);
                     notice("Alpine Linux: اكتب cat /etc/os-release أو apk --version");
+                    launchAgentGoal();
                 }
             });
         },"linux-offline-installer").start();
