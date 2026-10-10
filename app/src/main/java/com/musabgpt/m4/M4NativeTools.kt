@@ -21,6 +21,8 @@ import org.json.JSONObject
  * that the Arabic Terminal already uses. Never a fake console or Termux API.
  */
 class M4NativeTools(private val app: Application) {
+    @Volatile private var currentService: TerminalService? = null
+    fun cancelTerminalCommand() { currentService?.cancelAgentCommand() }
     companion object {
         private val terminalOnlySuffix = Regex(
             """\s+(?:باستخدام|عبر|عن طريق|من خلال|بواسطة)\s+(?:الطرفية|الترمينال|طرفيتك|terminal)\s*[.!؟]*$""",
@@ -52,7 +54,7 @@ class M4NativeTools(private val app: Application) {
     }
 
     suspend fun execute(name: String, args: JSONObject, userRequest: String,
-                        approvedShell: Boolean): String {
+                        approvedShell: Boolean, onOutput: (String) -> Unit = {}): String {
         return when (name) {
             "open_app" -> {
                 val target=args.optString("name","").trim().take(100)
@@ -91,7 +93,7 @@ class M4NativeTools(private val app: Application) {
                     "الأمر فارغ أو أطول من المسموح."
                 else if (Regex("""(?i)(gh\\s+auth\\s+token|cat\\s+.*(\\.ssh|hosts\\.yml|\\.env)|printenv|(^|\\s)env($|\\s))""").containsMatchIn(command))
                     "رفض قراءة أو عرض مفاتيح الاعتماد."
-                else executeTerminal(command, 45)
+                else executeTerminal(command, 45, onOutput)
             }
             else -> "هذه الأداة غير موجودة في M4: " + name
         }
@@ -118,7 +120,8 @@ class M4NativeTools(private val app: Application) {
                "اتبع تعليمات رمز الجهاز؛ لا تضع رمز وصولك في المحادثة."
     }
 
-    private suspend fun executeTerminal(command: String, seconds: Int): String {
+    private suspend fun executeTerminal(command: String, seconds: Int,
+                                        onOutput: (String) -> Unit = {}): String {
         // Prepare the same bundled Alpine filesystem used by MainActivity.
         // The first startup can take time while extracting verified assets.
         withContext(Dispatchers.IO) { LinuxEnvironment.install(app) }
@@ -143,10 +146,12 @@ class M4NativeTools(private val app: Application) {
                 if (!bound) throw IllegalStateException("لا يمكن ربط خدمة الطرفية.")
             }
             val service=withTimeout(10000) { ready.await() }
+            currentService=service
             return withContext(Dispatchers.IO) {
-                service.runAgentCommand(command,seconds).take(25000)
+                service.runAgentCommand(command, seconds) { part -> onOutput(part) }.take(25000)
             }
         } finally {
+            currentService=null
             if (bound) withContext(Dispatchers.Main) {
                 try { app.unbindService(connection) } catch (_: IllegalArgumentException) {}
             }
