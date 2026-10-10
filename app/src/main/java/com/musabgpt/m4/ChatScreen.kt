@@ -1,5 +1,8 @@
 package com.musabgpt.m4
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -104,6 +107,13 @@ fun ChatScreen(
     val activeRoute by vm.activeRoute.collectAsState()
     val terminalOutput by vm.terminalOutput.collectAsState()
     val approval by vm.approval.collectAsState()
+    val contactPermissionTicket by vm.contactsPermissionTicket.collectAsState()
+    val contactPermissionLauncher=rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> vm.onContactsPermissionResult(granted) }
+    LaunchedEffect(contactPermissionTicket) {
+        if(contactPermissionTicket>0) contactPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+    }
     val provider = providers[providerIndex.coerceIn(providers.indices)]
     val current = conversations.firstOrNull { it.id == currentId } ?: conversations.first()
 
