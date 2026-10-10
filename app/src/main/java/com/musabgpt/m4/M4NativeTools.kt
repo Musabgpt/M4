@@ -91,9 +91,9 @@ class M4NativeTools(private val app: Application) {
                 if (!approvedShell) "رفض المستخدم الإذن بتنفيذ الأمر."
                 else if (command.isEmpty() || command.length>2000 || command.contains('\u0000'))
                     "الأمر فارغ أو أطول من المسموح."
-                else if (Regex("""(?i)(gh\\s+auth\\s+token|cat\\s+.*(\\.ssh|hosts\\.yml|\\.env)|printenv|(^|\\s)env($|\\s))""").containsMatchIn(command))
+                else if (Regex("""(?i)(gh\s+auth\s+token|cat\s+.*(\.ssh|hosts\.yml|\.env)|printenv|(^|\s)env($|\s))""").containsMatchIn(command))
                     "رفض قراءة أو عرض مفاتيح الاعتماد."
-                else executeTerminal(command, 45, onOutput)
+                else executeTerminal(command, args.optInt("timeout_seconds",90).coerceIn(5,180), onOutput)
             }
             else -> "هذه الأداة غير موجودة في M4: " + name
         }
