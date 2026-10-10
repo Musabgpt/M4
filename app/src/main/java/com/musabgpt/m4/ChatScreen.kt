@@ -101,6 +101,7 @@ fun ChatScreen(
     val providers by vm.providers.collectAsState()
     val providerIndex by vm.providerIndex.collectAsState()
     val activeRoute by vm.activeRoute.collectAsState()
+    val terminalOutput by vm.terminalOutput.collectAsState()
     val approval by vm.approval.collectAsState()
     val provider = providers[providerIndex.coerceIn(providers.indices)]
     val current = conversations.firstOrNull { it.id == currentId } ?: conversations.first()
@@ -343,6 +344,24 @@ fun ChatScreen(
                             Icon(Icons.Filled.Code, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("تنفيذ كود")
+                        }
+                    }
+                    if (terminalOutput.isNotBlank() && isStreaming) {
+                        val logScroll=rememberScrollState()
+                        LaunchedEffect(terminalOutput) { logScroll.scrollTo(logScroll.maxValue) }
+                        Surface(
+                            color = Color(0xFF08111D),
+                            modifier = Modifier.fillMaxWidth().heightIn(max=152.dp)
+                                .padding(horizontal=12.dp),
+                            shape = RoundedCornerShape(9.dp)
+                        ) {
+                            Text(
+                                terminalOutput,
+                                color=Color(0xFFE7EFF9),
+                                fontFamily=FontFamily.Monospace,
+                                fontSize=11.sp,
+                                modifier=Modifier.verticalScroll(logScroll).padding(10.dp)
+                            )
                         }
                     }
                     InputBar(
