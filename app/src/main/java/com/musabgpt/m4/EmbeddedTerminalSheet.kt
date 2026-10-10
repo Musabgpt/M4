@@ -38,6 +38,7 @@ import kotlin.coroutines.coroutineContext
 @Composable
 fun EmbeddedTerminalSheet(
     initialCommand: String?,
+    providerFamily: String,
     onDismiss: () -> Unit
 ) {
     val ctx = LocalContext.current
@@ -84,7 +85,25 @@ fun EmbeddedTerminalSheet(
         try {
             val s = backend.openChatSession()
             session = s
-            if (!initialCommand.isNullOrBlank()) backend.write(s, initialCommand + "\n")
+            if (!initialCommand.isNullOrBlank()) {
+                if (initialCommand.startsWith("m4-agent-start ")) {
+                    // Match MainActivity's private provider setup for the real coding agent.
+                    // Never put API tokens, passwords or user-controlled shell text here.
+                    withContext(Dispatchers.IO) {
+                        val allowed = setOf("freellmpool","gpt4free","free-llm-gateway","free-llm-api")
+                        require(providerFamily in allowed) { "مزود غير مدعوم" }
+                        val folder = java.io.File(LinuxEnvironment.rootfs(ctx),"root/.m4-agent")
+                        check(folder.isDirectory || folder.mkdirs()) { "تعذر إنشاء إعدادات الوكيل" }
+                        val file = java.io.File(folder,"provider.env")
+                        file.writeText("export M4_GATEWAY_FAMILY=" + providerFamily + "\n")
+                        file.setReadable(false,false)
+                        file.setWritable(false,false)
+                        file.setReadable(true,true)
+                        file.setWritable(true,true)
+                    }
+                }
+                backend.write(s, initialCommand + "\n")
+            }
             while (coroutineContext.isActive) {
                 display = backend.renderChatSession(s).takeLast(30000)
                 delay(200)
