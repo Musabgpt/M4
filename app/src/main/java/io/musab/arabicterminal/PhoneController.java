@@ -148,6 +148,7 @@ public final class PhoneController {
             message.trim().isEmpty() || recipient.length()>100 || message.length()>2000)
             return "لا توجد جهة اتصال أو نص رسالة صالح.";
         String phone=recipient.trim().replaceAll("[\\s()+\\-]","");
+        if(phone.startsWith("00"))phone=phone.substring(2);
         if(!phone.matches("[0-9]{8,15}")){
             if(ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS)!=PackageManager.PERMISSION_GRANTED)
                 return "فهمت أنك تريد إرسال «"+message+"» إلى «"+recipient+
@@ -186,6 +187,7 @@ public final class PhoneController {
             }
         }
         if(!phone.matches("[0-9]{8,15}"))return "رقم غير صالح. استخدم الرقم الدولي مع رمز البلد.";
+        if(phone.startsWith("0"))return "الرقم محلي ولا يحتوي رمز البلد. اكتب الرقم الدولي لتجنب مراسلة جهة خاطئة.";
         Uri link=new Uri.Builder().scheme("whatsapp").authority("send")
             .appendQueryParameter("phone",phone)
             .appendQueryParameter("text",message).build();
