@@ -63,8 +63,14 @@ class M4NativeTools(private val app: Application) {
                     PhoneController.run(app,ArabicCommandRouter.parse("افتح تطبيق " + target))
                 }
             }
-            "list_apps" -> withContext(Dispatchers.Main) {
-                PhoneController.run(app,ArabicCommandRouter.parse("اعرض التطبيقات")).take(5000)
+            "list_apps" -> {
+                val request=ArabicCommandRouter.normalize(userRequest)
+                if (!request.contains("التطبيقات") && !request.contains("البرامج المثبتة") &&
+                    !request.contains("installed apps")) {
+                    "لم يطلب المستخدم استعراض التطبيقات المثبتة؛ لن أرسل قائمة التطبيقات إلى مزود خارجي."
+                } else withContext(Dispatchers.Main) {
+                    PhoneController.run(app,ArabicCommandRouter.parse("اعرض التطبيقات")).take(5000)
+                }
             }
             "github_connect" -> {
                 if (!explicitGithubIntent(userRequest)) "اطلب ربط GitHub بوضوح أولاً."
