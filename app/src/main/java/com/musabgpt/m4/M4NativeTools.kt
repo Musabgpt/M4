@@ -37,7 +37,7 @@ class M4NativeTools(private val app: Application) {
             if ((normalized.contains("واتس") || normalized.contains("whatsapp")) &&
                 listOf("ارسل","ابعت","ابعث","ابريل","اريل","رسالة").any {
                     normalized.contains(it)
-                }) return null
+                }) return "whatsapp_unparsed"
             if (normalized in listOf("اربط github", "ربط github", "اتصل ب github",
                     "وصل github", "ربط جيت هاب", "اربط جيت هاب",
                     "connect github", "github login")) return "github_connect"
@@ -55,6 +55,7 @@ class M4NativeTools(private val app: Application) {
 
     suspend fun performQuick(action: String): String = withContext(Dispatchers.Main) {
         if (action == "github_connect") return@withContext githubConnect()
+        if (action == "whatsapp_unparsed") return@withContext "هذا طلب رسالة واتساب، وليس اسم تطبيق. أحتاج نص الرسالة واسم المستلم بوضوح؛ لم أرسل شيئًا."
         val whatsapp=WhatsAppPlanner.fromAction(action)
         if (whatsapp!=null) return@withContext PhoneController.prepareWhatsAppDraft(
             app, whatsapp.recipient, whatsapp.body
@@ -71,6 +72,8 @@ class M4NativeTools(private val app: Application) {
                 if (target.isEmpty()) "اسم التطبيق غير موجود."
                 else if (!explicitOpenIntent(userRequest))
                     "لا يمكن فتح التطبيقات دون طلب واضح من المستخدم."
+                else if (WhatsAppPlanner.looksLikeMessageRequest(userRequest))
+                    "رفضت فتح تطبيق باسم جملة كاملة؛ هذا طلب رسالة واتساب. حدد المستلم والنص لتجهيز المسودة."
                 else withContext(Dispatchers.Main) {
                     PhoneController.run(app,ArabicCommandRouter.parse("افتح تطبيق " + target))
                 }

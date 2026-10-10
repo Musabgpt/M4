@@ -1,5 +1,7 @@
 package com.musabgpt.m4
 
+import io.musab.arabicterminal.ArabicCommandRouter
+
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +34,24 @@ object ChatApi {
     private val cooldown=ConcurrentHashMap<String,Long>()
     private const val MAX_TOOL_ROUNDS=12
     private const val MAX_TOOL_CALLS=30
+
+    /**
+     * A request asking for a real side effect cannot be satisfied by plain
+     * model text. If a free provider does not return a function call, label
+     * the task incomplete rather than displaying a fabricated success.
+     */
+    private fun requiresRealTools(request: String): Boolean {
+        val cleaned=request.trim()
+        if(cleaned.startsWith("!")) return true
+        val normalized=ArabicCommandRouter.normalize(cleaned)
+        if (listOf("كيف ","شو ","ما ","ماذا ","هل ","لماذا ","اشرح ",
+                "what ","how ","why ").any { normalized.startsWith(it) }) return false
+        val first=normalized.substringBefore(" ")
+        return first in setOf("افتح","شغل","نفذ","اجري","اصلح","صلح",
+            "طور","ابني","انشئ","ثبت","احذف","ارسل","ابعت","اريل",
+            "ابريل","ابعث","انسخ","ارفع","اختبر","افحص","عدل","شغّل",
+            "run","execute","open","install","build","fix","send","deploy")
+    }
 
     fun stop() { stopped=true; connection?.disconnect() }
 
@@ -106,7 +126,9 @@ object ChatApi {
         }
         val original=history.lastOrNull { it.role=="user" }?.content.orEmpty()
         val arabic=original.any { it in '\u0600'..'\u06FF' }
+        val actionMustUseTools=requiresRealTools(original)
         var toolCallsExecuted=0
+        var failedToolSteps=0
         var lastObservation=""
         var identicalObservations=0
         for (round in 0..MAX_TOOL_ROUNDS) {
@@ -118,8 +140,14 @@ object ChatApi {
                 var visible=false
                 try {
                     val turn=request(route,conversation,arabic,true) { event ->
-                        if(event is ChatEvent.Text) visible=true
-                        emit(event)
+                        // Hold the initial model prose for action requests until
+                        // we know the provider returned a real tool call.
+                        if(event is ChatEvent.Text && actionMustUseTools && toolCallsExecuted==0) {
+                            // Pure text is not execution evidence.
+                        } else {
+                            if(event is ChatEvent.Text) visible=true
+                            emit(event)
+                        }
                     }
                     preferredRoute=route.baseUrl
                     cooldown.remove(route.baseUrl+"|"+route.model)
@@ -137,7 +165,19 @@ object ChatApi {
             val result=response ?: throw IllegalStateException(
                 "المزودات المجانية لم تستجب: " + (problem?.message ?: "تحقق من الإنترنت"))
             if(result.calls.isEmpty()) {
-                if (!result.textSent) throw IllegalStateException("المزود أعاد إجابة فارغة")
+                if(actionMustUseTools && toolCallsExecuted==0) {
+                    emit(ChatEvent.Text(
+                        "لم أنفّذ الأمر: مزود النموذج لم يُرجع استدعاء أداة حقيقيًا. " +
+                        "قد يكون لا يدعم الأدوات؛ غيّر المزوّد أو أعد المحاولة. " +
+                        "لم أعتبر نص النموذج دليلًا على التنفيذ."
+                    ))
+                    return@flow
+                }
+                if(!result.textSent && toolCallsExecuted==0)
+                    throw IllegalStateException("المزود أعاد إجابة فارغة")
+                if(failedToolSteps>0) emit(ChatEvent.Text(
+                    "\n⚠️ لم تنجح كل خطوات المهمة؛ راجع نتائج الأدوات أعلاه قبل اعتبار العمل مكتملًا."
+                ))
                 return@flow
             }
             if(round==MAX_TOOL_ROUNDS ||
@@ -156,6 +196,10 @@ object ChatApi {
                     "فشل تنفيذ الأداة: " + (e.message ?: "غير معروف")
                 }
                 toolCallsExecuted++
+                if(resultText.startsWith("رفض") || resultText.startsWith("تعذر") ||
+                    resultText.startsWith("فشل") ||
+                    Regex("""exit_code=[1-9][0-9]*\b""").containsMatchIn(resultText))
+                    failedToolSteps++
                 conversation.put(JSONObject().put("role","tool")
                     .put("tool_call_id",call.id).put("content",resultText.take(7000)))
                 emit(ChatEvent.ToolStatus(call.name + ": " + resultText.take(500)))

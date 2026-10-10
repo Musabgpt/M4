@@ -64,6 +64,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val backgroundTaskRunning=_backgroundTaskRunning.asStateFlow()
     private var terminalMonitorJob: Job?=null
     private var liveTerminalMessageId: String?=null
+    private var backgroundConversationId: String?=null
     private var terminalReady=false
     private val queuedTerminalLines=ArrayDeque<String>()
     private fun sendTerminalLine(line: String) {
@@ -112,6 +113,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         _backgroundTaskRunning.value=true
+        backgroundConversationId=convId
         terminalReady=false
         queuedTerminalLines.clear()
         val marker="__M4_TASK_DONE_"+UUID.randomUUID().toString().replace("-","")+"__"
@@ -167,6 +169,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 queuedTerminalLines.clear()
                 _backgroundTaskRunning.value=false
                 liveTerminalMessageId=null
+                backgroundConversationId=null
                 saveHistory()
             }
         }
@@ -176,11 +179,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (!_backgroundTaskRunning.value) return
         inChatTerminal.sendControl("\u0003")
         val id=liveTerminalMessageId
-        if (id!=null) edit(_currentId.value) { conv -> conv.copy(messages=conv.messages.map {
-            if (it.id==id) it.copy(content=it.content+"\n⏹️ أوقف المستخدم المهمة.".replace("\\n","\n")) else it
+        if (id!=null) edit(backgroundConversationId ?: _currentId.value) { conv -> conv.copy(messages=conv.messages.map {
+            if (it.id==id) it.copy(content=it.content+"\n⏹️ أوقف المستخدم المهمة.") else it
         }) }
         terminalMonitorJob?.cancel()
         terminalMonitorJob=null
+        backgroundConversationId=null
         _backgroundTaskRunning.value=false
         terminalReady=false
         queuedTerminalLines.clear()
@@ -265,9 +269,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 edit(id) { it.copy(messages=it.messages+
                     UiMessage(role="user",content=clean)) }
                 if (_backgroundTaskRunning.value) {
-                    // Explicit ! input is passed to the running interactive PTY.
-                    if (terminalReady) inChatTerminal.writeLine(cmd)
-                    else sendTerminalLine(cmd)
+                    edit(id) { it.copy(messages=it.messages+UiMessage(role="assistant",
+                        content="هناك مهمة أخرى تعمل الآن؛ لن أمرّر الأمر إلى عملية تفاعلية قد تتلقى الإدخال خطأً. أوقف المهمة أو انتظر اكتمالها.")) }
                 } else launchTerminal(cmd)
             }
             return
@@ -284,6 +287,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         taskApprovedCommands=0
         _terminalOutput.value=""
         val primary=selected
+        var toolLogMessageId: String?=null
         val quick=M4NativeTools.quickAction(clean)
         _activeRoute.value=if(quick!=null) "أدوات أندرويد المحلية" else "جاري الاتصال..."
         _streaming.value=true
@@ -303,7 +307,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 if(quick!=null) {
                     if(quick=="github_connect") {
                         launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
-                        buffer.append("فتحت طرفية GitHub التفاعلية ضمن المحادثة؛ أكمل ربط حسابك هناك.")
+                        buffer.append("بدأت عملية ربط GitHub داخل المحادثة. لا يعتبر الحساب مرتبطًا حتى تؤكد نتيجة تسجيل الدخول الفعلية.")
                     } else if (quick.startsWith("whatsapp_draft:")) {
                         val draft=WhatsAppPlanner.fromAction(quick)
                         if (draft!=null && !WhatsAppPlanner.isPhone(draft.recipient) &&
@@ -335,13 +339,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                            (clean.contains("github",ignoreCase=true) ||
                             clean.contains("جيت هاب") || clean.contains("غيتهاب"))) {
                             launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
-                            "فُتحت طرفية GitHub داخل شاشة المحادثة؛ أكمل التفويض محلياً."
+                            "بدأ ربط GitHub عبر Alpine في المحادثة؛ لم يُتحقق من المصادقة بعد."
                         } else nativeTools.execute(call.name,call.arguments,clean,approved) { chunk ->
                             // Genuine PTY stdout, captured while the command is running.
                             val limited=chunk.takeLast(1500)
                             if(limited.isNotBlank()) {
                                 _terminalOutput.value=(_terminalOutput.value+limited).takeLast(8000)
-                                _activeRoute.value="الطرفية: "+limited.takeLast(80).replace("\n"," ")
+                                val rendered="```sh\n"+_terminalOutput.value.replace("```","'''")+"\n```"
+                                val logId=toolLogMessageId
+                                if(logId==null) {
+                                    val entry=UiMessage(role="terminal", content=rendered)
+                                    toolLogMessageId=entry.id
+                                    edit(convId) { it.copy(messages=it.messages+entry) }
+                                } else edit(convId) { c -> c.copy(messages=c.messages.map {
+                                    if(it.id==logId) it.copy(content=rendered) else it
+                                }) }
+                                _activeRoute.value="Alpine: "+limited.takeLast(80).replace("\n"," ")
                             }
                         }
                     }.collect { event ->

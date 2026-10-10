@@ -18,6 +18,15 @@ internal object WhatsAppPlanner {
         """(?is)^(?:افتح\s+)?(?:تطبيق\s+)?(?:الواتساب|واتساب|واتس\s*اب|واتس|whatsapp)\s+(?:و\s*|ثم\s+)?(?:ارسل|ابعت|ابعث|ابريل|اريل|بعت)\s+(?:رسالة\s+|رساله\s+)?(.+?)\s+(?:الى|الي|ل)\s*(.+?)\s*[.!؟]*$"""
     )
 
+    /** A compound WhatsApp request must never be forwarded to OPEN_APP as an app title. */
+    fun looksLikeMessageRequest(request: String): Boolean {
+        val normalized=ArabicCommandRouter.normalize(request)
+        return (normalized.contains("واتس") || normalized.contains("whatsapp")) &&
+            listOf("ارسل","ابعث","ابعت","ابريل","اريل","بعت","رسالة","رساله").any {
+                normalized.contains(it)
+            }
+    }
+
     fun parse(request: String): Draft? {
         val normalized = ArabicCommandRouter.normalize(request)
         val match = compound.matchEntire(normalized) ?: return null

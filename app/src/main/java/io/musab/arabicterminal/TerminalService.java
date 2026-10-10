@@ -1,6 +1,7 @@
 package io.musab.arabicterminal;
 
 import android.app.Notification;
+import com.musabgpt.m4.M4ChatActivity;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -87,7 +88,7 @@ public final class TerminalService extends Service {
         return START_STICKY;
     }
     private void startNotification(){
-        Intent open=new Intent(this,MainActivity.class);
+        Intent open=new Intent(this,M4ChatActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent go=PendingIntent.getActivity(this,0,open,
             PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
