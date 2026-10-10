@@ -47,7 +47,9 @@ class ChatBridgeContract(unittest.TestCase):
         prompt=read(ROOT/"app/src/main/assets/m4-chat-system.txt")
         self.assertIn('app.assets.open("m4-chat-system.txt")',vm)
         self.assertIn("ChatApi.stream(primary,history,prompt)",vm)
-        self.assertIn("Claude Code Opus 5.5",prompt)
+        self.assertIn("خطط",prompt)
+        self.assertIn("تحقق",prompt)
+        self.assertIn("النتيجة الفعلية",prompt)
         self.assertIn("لا ترد بالإسبانية",prompt)
         self.assertIn("الطرفية العربية",prompt)
 
@@ -74,9 +76,11 @@ class ChatBridgeContract(unittest.TestCase):
         self.assertNotIn("MainActivity::class.java",activity)
         self.assertNotIn("EmbeddedTerminalSheet(",screen)
         self.assertNotIn("ModalBottomSheet(",screen)
-        self.assertIn("vm.terminalMode.collectAsState()",screen)
-        self.assertIn("fun leaveTerminal()",vm)
-        self.assertIn("sendTerminalLine(clean)",vm)
+        self.assertNotIn("terminalMode",screen)
+        self.assertNotIn("terminalMode",vm)
+        self.assertIn("vm.backgroundTaskRunning.collectAsState()",screen)
+        self.assertIn("fun stopBackgroundTask()",vm)
+        self.assertIn("fun launchTerminal(",vm)
         self.assertIn("inChatTerminal.writeLine(line)",vm)
         self.assertIn("queuedTerminalLines",vm)
         self.assertIn("m4-agent-start ",screen)
@@ -97,7 +101,9 @@ class ChatBridgeContract(unittest.TestCase):
         self.assertIn("pwd -P",service)
         self.assertIn("MAX_TOOL_ROUNDS=12",api)
         self.assertIn("identicalObservations>=2",api)
-        self.assertIn("val terminalOutput by vm.terminalOutput.collectAsState()",screen)
+        self.assertIn('role="terminal"',vm)
+        self.assertIn("toolLogMessageId",vm)
+        self.assertNotIn("if (terminalOutput.isNotBlank() && isStreaming)",screen)
         self.assertIn("service.runAgentCommand(command, seconds)",bridge)
 
     def test_whatsapp_compound_task_is_not_an_app_name(self):
@@ -107,6 +113,8 @@ class ChatBridgeContract(unittest.TestCase):
         screen=read(KT/"ChatScreen.kt")
         api=read(KT/"ChatApi.kt")
         self.assertIn("WhatsAppPlanner.parse(cleaned)",bridge)
+        self.assertIn("WhatsAppPlanner.looksLikeMessageRequest(userRequest)",bridge)
+        self.assertIn('"whatsapp_unparsed"',bridge)
         self.assertIn('whatsapp_draft:',parser)
         self.assertIn("prepareWhatsAppDraft",phone)
         self.assertIn("READ_CONTACTS",read(ROOT/"app/src/main/AndroidManifest.xml"))
@@ -114,6 +122,16 @@ class ChatBridgeContract(unittest.TestCase):
         self.assertIn('"prepare_whatsapp_draft"',api)
         self.assertIn("لم تُرسل الرسالة تلقائياً",phone)
         self.assertNotIn("ModalBottomSheet(",screen)
+
+    def test_foreground_terminal_returns_to_the_one_chat_activity(self):
+        service=read(JAVA/"TerminalService.java")
+        self.assertIn("M4ChatActivity.class",service)
+        self.assertNotIn("new Intent(this,MainActivity.class)",service)
+
+    def test_agent_never_claims_tool_completion_without_tool_calls(self):
+        api=read(KT/"ChatApi.kt")
+        self.assertIn("requiresRealTools",api)
+        self.assertIn("toolCallsExecuted==0",api)
 
     def test_only_main_push_workflow_generates_apk(self):
         android=read(ROOT/".github/workflows/android.yml")
