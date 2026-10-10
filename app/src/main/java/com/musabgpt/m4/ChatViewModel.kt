@@ -117,7 +117,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val marker="__M4_TASK_DONE_"+UUID.randomUUID().toString().replace("-","")+"__"
         val decorated=command+"; printf '\\n"+marker+":%s\\n' \"$?\""
         val terminalMessage=UiMessage(role="terminal",
-            content="\`\`\`sh\\n⏳ جاري تجهيز Alpine Linux وتشغيل المهمة...\\n\`\`\`")
+            content="```sh\n⏳ جاري تجهيز Alpine Linux وتشغيل المهمة...\n```")
         liveTerminalMessageId=terminalMessage.id
         edit(convId) { it.copy(messages=it.messages+terminalMessage) }
         terminalMonitorJob?.cancel()
@@ -129,6 +129,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 // New run must not inherit the previous interactive terminal screen.
                 inChatTerminal.writeLine("clear")
                 inChatTerminal.writeLine(decorated)
+                while (queuedTerminalLines.isNotEmpty()) sendTerminalLine(queuedTerminalLines.removeFirst())
                 var lastScreen=""
                 val completed=Regex("(?m)^"+Regex.escape(marker)+":([0-9]+)\\s*$")
                 while (isActive && _backgroundTaskRunning.value) {
@@ -142,7 +143,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             status.groupValues[1]=="0" -> "✅ انتهى التنفيذ (exit 0)"
                             else -> "⚠️ انتهى التنفيذ (exit "+status.groupValues[1]+")"
                         }
-                        val formatted=header+"\\n\`\`\`sh\\n"+display+"\\n\`\`\`"
+                        val formatted=header+"\n```sh\n"+display+"\n```"
                         edit(convId) { conv -> conv.copy(messages=conv.messages.map {
                             if (it.id==terminalMessage.id) it.copy(content=formatted) else it
                         }) }
@@ -173,7 +174,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopBackgroundTask() {
         if (!_backgroundTaskRunning.value) return
-        inChatTerminal.sendControl("\\u0003")
+        inChatTerminal.sendControl("\u0003")
+        val id=liveTerminalMessageId
+        if (id!=null) edit(_currentId.value) { conv -> conv.copy(messages=conv.messages.map {
+            if (it.id==id) it.copy(content=it.content+"\n⏹️ أوقف المستخدم المهمة.".replace("\\n","\n")) else it
+        }) }
         terminalMonitorJob?.cancel()
         terminalMonitorJob=null
         _backgroundTaskRunning.value=false
