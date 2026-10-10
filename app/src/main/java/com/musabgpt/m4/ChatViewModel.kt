@@ -1,6 +1,8 @@
 package com.musabgpt.m4
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
@@ -60,6 +62,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val _terminalMode=MutableStateFlow(false)
     val terminalMode=_terminalMode.asStateFlow()
     private var terminalMonitorJob: Job?=null
+    private data class PendingWhatsApp(val action: String, val conversationId: String, val replyId: String)
+    private var pendingWhatsApp: PendingWhatsApp?=null
+    private val _contactsPermissionTicket=MutableStateFlow(0)
+    val contactsPermissionTicket=_contactsPermissionTicket.asStateFlow()
+    fun onContactsPermissionResult(allowed: Boolean) {
+        val pending=pendingWhatsApp ?: return
+        pendingWhatsApp=null
+        viewModelScope.launch {
+            val result=if(allowed) nativeTools.performQuick(pending.action)
+                else "لم أتمكن من العثور على المستلم بدون إذن جهات الاتصال. يمكنك كتابة رقم الهاتف الدولي بدلاً من ذلك."
+            edit(pending.conversationId) { conv -> conv.copy(messages=conv.messages.map {
+                if(it.id==pending.replyId) it.copy(content=result) else it
+            }) }
+            saveHistory()
+        }
+    }
     private val prompt by lazy {
         app.assets.open("m4-chat-system.txt").bufferedReader(Charsets.UTF_8).use { it.readText() }
     }
@@ -245,6 +263,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     if(quick=="github_connect") {
                         launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
                         buffer.append("فتحت طرفية GitHub التفاعلية ضمن المحادثة؛ أكمل ربط حسابك هناك.")
+                    } else if (quick.startsWith("whatsapp_draft:")) {
+                        val draft=WhatsAppPlanner.fromAction(quick)
+                        if (draft!=null && !WhatsAppPlanner.isPhone(draft.recipient) &&
+                            getApplication<Application>().checkSelfPermission(Manifest.permission.READ_CONTACTS)
+                                != PackageManager.PERMISSION_GRANTED) {
+                            pendingWhatsApp=PendingWhatsApp(quick,convId,reply.id)
+                            buffer.append("فهمت المهمة: إعداد رسالة واتساب إلى «")
+                                .append(draft.recipient).append("» بنص «")
+                                .append(draft.body).append("». أحتاج إذن جهات الاتصال للتأكد من رقم المستلم محلياً.")
+                            _contactsPermissionTicket.value++
+                        } else buffer.append(nativeTools.performQuick(quick))
                     } else buffer.append(nativeTools.performQuick(quick))
                 } else {
                     ChatApi.stream(primary,history,prompt) { call ->
