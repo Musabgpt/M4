@@ -98,7 +98,6 @@ public final class PhoneController {
             case "جوجل":case "google":return "com.google.android.googlequicksearchbox";
             case "بلاي ستور":case "متجر بلاي":case "play store":return "com.android.vending";
             case "شات جي بي تي":case "شات جيبت":case "chatgpt":return "com.openai.chatgpt";
-            case "تيرمكس":case "ترمكس":case "termux":return "com.termux";
             case "ديسكورد":case "discord":return "com.discord";
             case "انستغرام":case "انستا":case "instagram":return "com.instagram.android";
             case "فيسبوك":case "facebook":return "com.facebook.katana";

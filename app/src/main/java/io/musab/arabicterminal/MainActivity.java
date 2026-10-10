@@ -115,7 +115,15 @@ public final class MainActivity extends Activity {
         String goal=intent==null?null:intent.getStringExtra(EXTRA_AGENT_GOAL);
         if(intent!=null && intent.getBooleanExtra(EXTRA_GITHUB_LOGIN,false)){
             pendingGithubLogin=true;
-            if(service!=null && active!=null && active.linux)launchGithubLogin();
+            if(service!=null){
+                useLinux=true;
+                if(LinuxEnvironment.installed(this)){
+                    if(active==null || !active.linux)createSession(false);
+                    launchGithubLogin();
+                } else if(!preparingLinux){
+                    prepareLinux();
+                }
+            }
         }
         if(goal!=null){
             pendingAgentGoal=goal;
