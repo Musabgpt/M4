@@ -15,6 +15,11 @@ import urllib.parse
 import urllib.request
 import uuid
 
+# Portable, tested continuity and durable task checkpoint modules imported
+# from the last verified advanced NewAl-Cloud build.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from newal import continuity, task_state
+
 STATE = ".term-agent"
 COMMANDS = {"python","python3","node","npm","npx","git","gh","pytest","vitest",
  "gradle","java","javac","bash","sh","rg","grep","ls","find","cat","pwd",
@@ -207,6 +212,10 @@ def loop(root,state,goal,max_steps,approved):
         raise ValueError("Provide the goal to start a new task")
     if current.get("goal")!=goal:
         current={"goal":goal,"step":0,"phase":"new","last":"","repeat":0}
+        checkpoint=task_state.checkpoint(
+            str(root),objective=goal,progress="Goal received",
+            next_step="Inspect the project and implement the first verifiable change")
+        current["newal_checkpoint"]=checkpoint["id"]
     url,model=endpoint()
     current["phase"]="running"
     save(path,current)
@@ -224,6 +233,9 @@ def loop(root,state,goal,max_steps,approved):
             if not calls:
                 msg=str(reply.get("content") or "")[:1200]
                 log(db,"assistant",msg)
+                if continuity.lost_task_reply(msg,goal):
+                    log(db,"continuity",continuity.correction(goal))
+                    print("Recovered original goal after model lost task",flush=True)
                 print("No tool call:",msg,flush=True)
             for item in calls:
                 fn=item.get("function") or {}
@@ -245,6 +257,9 @@ def loop(root,state,goal,max_steps,approved):
                     if passed:
                         current["phase"]="complete"
                         current["summary"]=str(args.get("summary",""))
+                        if current.get("newal_checkpoint"):
+                            task_state.complete(str(root),current["newal_checkpoint"],
+                                                current["summary"])
                         save(path,current)
                         print("COMPLETE: verification passed",flush=True)
                         return 0
@@ -254,6 +269,12 @@ def loop(root,state,goal,max_steps,approved):
                         print("BLOCKED:",report,flush=True)
                         return 2
                     print("Verification failed; repairing...",report[:1000],flush=True)
+            if current.get("newal_checkpoint"):
+                task_state.checkpoint(
+                    str(root),task_id=current["newal_checkpoint"],
+                    progress="Finished verified action cycle "+str(current["step"]),
+                    next_step="Continue working and run independent verification",
+                    evidence="Recorded events in .term-agent/events.sqlite3")
             current["repeat"]=(current.get("repeat",0)+1 if signature==current.get("last") else 0)
             current["last"]=signature
             if current["repeat"]>=3:
@@ -309,6 +330,7 @@ def main():
     re.add_argument("--steps",type=int,default=30)
     re.add_argument("--allow-exec",action="store_true")
     sub.add_parser("status")
+    sub.add_parser("tasks")
     sub.add_parser("doctor")
     sub.add_parser("tools")
     a=sub.add_parser("check-add")
@@ -337,6 +359,9 @@ def main():
         return 0
     if args.action=="status":
         print(json.dumps(load(state/"state.json",{"phase":"new"}),ensure_ascii=False,indent=2))
+        return 0
+    if args.action=="tasks":
+        print(json.dumps(task_state.list_tasks(str(root)),ensure_ascii=False,indent=2))
         return 0
     if args.action=="rollback":
         rollback(root,state,args.path)

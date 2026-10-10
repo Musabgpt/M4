@@ -38,6 +38,8 @@ docker run --rm --network host \
 # are deliberately not fetched during the Android build.
 mkdir -p "$STAGING/opt/term-agent" "$STAGING/usr/local/bin"
 cp "$ROOT/agent/agent.py" "$STAGING/opt/term-agent/agent.py"
+cp -R "$ROOT/agent/newal" "$STAGING/opt/term-agent/newal"
+find "$STAGING/opt/term-agent/newal" -type f -name '*.pyc' -delete
 cp "$ROOT/agent/tool-registry.json" "$STAGING/opt/term-agent/tool-registry.json"
 cp "$ROOT/agent/term-agent.sh" "$STAGING/usr/local/bin/term-agent"
 cp "$ROOT/agent/term-agent-addons.sh" "$STAGING/usr/local/bin/term-agent-addons"

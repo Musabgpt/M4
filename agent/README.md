@@ -52,3 +52,12 @@ It stops on completion, repeated failure, configuration errors or its run cap.
 Code execution is opt-in when starting a goal; it is not isolated from other
 app-private files. Commands are passed filtered environment variables to avoid
 exposing API secrets by default.
+
+## MusabAI advanced engine components (verified NewAl-Cloud)
+
+M4 vendors deterministic conversation continuity and durable project checkpoint
+modules from NewAl-Cloud commit d34858159aeb71c24b6d01aaba5a7a717fb33e73,
+the successful October 9 Android build. `term-agent tasks` lists these
+checkpoints. The primary coding loop still uses Term Agent and its own SQLite
+event history. Imported checkpoint modules do not automatically enable the
+full original NewAl Python UI, marketplace, account access, or installed models.

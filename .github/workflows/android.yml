@@ -27,7 +27,7 @@ jobs:
       - name: اختبار وكيل البرمجة والاستمرارية والأمان
         run: |
           python3 -m unittest discover -s agent_tests -v
-          python3 -m py_compile agent/agent.py
+          python3 -m py_compile agent/agent.py agent/newal/continuity.py agent/newal/task_state.py
           bash -n agent/term-agent.sh agent/term-agent-addons.sh agent/term-agent-watch.sh
       - name: تضمين Alpine Linux وPRoot بالتحقق من البصمات
         run: |
