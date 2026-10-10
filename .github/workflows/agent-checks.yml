@@ -1,0 +1,21 @@
+name: Agent core smoke tests
+on:
+  push:
+    branches: [main, feat/ai-agent-runtime]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python unit tests
+        run: python3 -m unittest discover -s agent_tests -v
+      - name: Python compile and script validation
+        run: |
+          python3 -m py_compile agent/agent.py
+          python3 -m json.tool agent/tool-registry.json > /dev/null
+          bash -n agent/term-agent.sh agent/term-agent-addons.sh

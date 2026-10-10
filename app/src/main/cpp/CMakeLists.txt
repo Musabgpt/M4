@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(arabicpty LANGUAGES C)
+add_library(arabicpty SHARED arabicpty.c)
+target_compile_features(arabicpty PRIVATE c_std_11)
+target_compile_options(arabicpty PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(arabicpty log)
