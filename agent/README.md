@@ -61,3 +61,10 @@ the successful October 9 Android build. `term-agent tasks` lists these
 checkpoints. The primary coding loop still uses Term Agent and its own SQLite
 event history. Imported checkpoint modules do not automatically enable the
 full original NewAl Python UI, marketplace, account access, or installed models.
+
+
+## M4 integration launcher
+
+From the Android Compose chat, **تنفيذ كود** launches `m4-agent-start 'your goal'` inside the bundled Alpine shell. The script checks model settings, clones the real public M4 repository on first run, refuses to overwrite existing non-Git files, retains existing local modifications, sets Python agent tests as completion criteria and invokes the resumable agent. This is not an automatic GitHub push or Android APK build; use the remote GitHub Actions workflow to validate APK changes. Manual command-line overrides `M4_AGENT_PROJECT` and `M4_AGENT_PROVIDER_FILE` can be used for a trusted existing checkout and local testing.
+
+The APK bundles a source snapshot at `/opt/m4-seed`, including the Kotlin Compose UI, Python tests and Git metadata for offline first-run work. It does not contain remote Git history or Android SDK; APK builds are validated in GitHub Actions. A missing snapshot falls back to public Git clone when networking works.

@@ -28,7 +28,7 @@ jobs:
         run: |
           python3 -m unittest discover -s agent_tests -v
           python3 -m py_compile agent/agent.py agent/newal/continuity.py agent/newal/task_state.py
-          bash -n agent/term-agent.sh agent/term-agent-addons.sh agent/term-agent-watch.sh
+          bash -n agent/term-agent.sh agent/term-agent-addons.sh agent/term-agent-watch.sh agent/m4-agent-start.sh
       - name: تضمين Alpine Linux وPRoot بالتحقق من البصمات
         run: |
           sudo apt-get update -qq
@@ -46,6 +46,9 @@ jobs:
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/term-agent'
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/term-agent/agent.py'
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/term-agent-watch'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/m4-agent-start'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/m4-seed/app/src/main/java/com/musabgpt/m4/ChatScreen.kt'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/m4-seed/.git/HEAD'
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/pytest'
       - name: تثبيت Gradle
         uses: gradle/actions/setup-gradle@v4

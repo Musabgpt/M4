@@ -32,3 +32,10 @@ Android foreground services cannot guarantee indefinite activity. `term-agent re
 
 GitHub Actions workflow `android.yml` generates a debug APK embedding verified Alpine + PRoot. A lighter `m4-kotlin.yml` checks compilation without the Linux bundle.
 The debug signing key may change between runs. Export any important app-private projects before reinstalling.
+
+
+## v1.0.1 — Real M4 project execution
+
+The Compose **تنفيذ كود** button now calls bundled `m4-agent-start` rather than creating an empty workspace. On first run the command copies the verified M4 source snapshot embedded in the APK into `/root/projects/M4` (or clones the public repository if the snapshot is unavailable); later runs **preserve local modifications** and reuse that checkout without an automatic pull/reset. A pre-existing non-checkout directory fails safely instead of being erased. The launcher configures `python3 -m unittest discover -s agent_tests -v` as real project verification, and the agent only reports completion after successful checks. Building the Android APK still requires GitHub Actions/Android SDK; Python tests do not prove Android correctness. User API/provider selection is forwarded using the private `provider.env` written by the app.
+
+The offline seed is a new local Git baseline, not a reproduction of the remote Git history. To work with the latest upstream changes, connect and review `git fetch origin` followed by an appropriate merge; the launcher never resets or force-pulls user changes.

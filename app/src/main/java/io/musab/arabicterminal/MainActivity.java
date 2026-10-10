@@ -325,11 +325,9 @@ public final class MainActivity extends Activity {
             destination.setReadable(true,true);
             destination.setWritable(true,true);
             pendingAgentGoal=null;
-            write(active,"mkdir -p /root/projects/M4 && cd /root/projects/M4 && "+
-                "term-agent init && . /root/.m4-agent/provider.env && "+
-                "term-agent run "+shellQuote(goal)+" --steps 40 --allow-exec\n");
-            notice("مهمة البرمجة بدأت في الطرفية. نجاح البناء والاختبارات مطلوب قبل إكمال المهمة. "+
-                   "إذا لم توجد اختبارات للمشروع استخدم term-agent check-add.");
+            write(active,"m4-agent-start "+shellQuote(goal)+"\n");
+            notice("يفتح الوكيل نسخة Git من مستودع M4 ويشغّل اختبارات المشروع الفعلية. "+
+                   "تحقق من نتيجة التنفيذ داخل الطرفية؛ لا يُعتبر الإنجاز مؤكداً قبل نجاح الاختبارات.");
         }catch(Exception error){
             notice("تعذّر تشغيل الوكيل: "+error.getMessage());
         }

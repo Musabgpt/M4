@@ -34,6 +34,20 @@ docker run --rm --network host \
     test -f /opt/guest/usr/bin/node || test -L /opt/guest/usr/bin/node
   '
 
+# Include the actual M4 source tree from this exact Git revision.
+# git archive excludes .git history, build artifacts and untracked secrets.
+# Recreate a clean local Git baseline for offline, on-device editing.
+SEED="$STAGING/opt/m4-seed"
+mkdir -p "$SEED"
+git -C "$ROOT" archive --format=tar HEAD | tar -C "$SEED" -xf -
+test -s "$SEED/agent/agent.py"
+test -s "$SEED/app/src/main/java/com/musabgpt/m4/ChatScreen.kt"
+git -C "$SEED" init -q
+git -C "$SEED" -c user.name='M4 APK Seed' -c user.email='m4-seed@localhost.invalid' add -A
+git -C "$SEED" -c user.name='M4 APK Seed' -c user.email='m4-seed@localhost.invalid' commit -qm 'Offline M4 source baseline'
+git -C "$SEED" remote add origin https://github.com/Musabgpt/M4.git
+test -d "$SEED/.git"
+
 # Ship the autonomous coding engine offline. Optional network-installed add-ons
 # are deliberately not fetched during the Android build.
 mkdir -p "$STAGING/opt/term-agent" "$STAGING/usr/local/bin"
@@ -44,7 +58,8 @@ cp "$ROOT/agent/tool-registry.json" "$STAGING/opt/term-agent/tool-registry.json"
 cp "$ROOT/agent/term-agent.sh" "$STAGING/usr/local/bin/term-agent"
 cp "$ROOT/agent/term-agent-addons.sh" "$STAGING/usr/local/bin/term-agent-addons"
 cp "$ROOT/agent/term-agent-watch.sh" "$STAGING/usr/local/bin/term-agent-watch"
-chmod 755 "$STAGING/usr/local/bin/term-agent" "$STAGING/usr/local/bin/term-agent-addons" "$STAGING/usr/local/bin/term-agent-watch"
+cp "$ROOT/agent/m4-agent-start.sh" "$STAGING/usr/local/bin/m4-agent-start"
+chmod 755 "$STAGING/usr/local/bin/term-agent" "$STAGING/usr/local/bin/term-agent-addons" "$STAGING/usr/local/bin/term-agent-watch" "$STAGING/usr/local/bin/m4-agent-start"
 python3 -m py_compile "$ROOT/agent/agent.py"
 test -s "$STAGING/opt/term-agent/agent.py"
 test -s "$STAGING/usr/bin/pytest"
