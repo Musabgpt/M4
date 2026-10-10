@@ -42,6 +42,8 @@ public final class TerminalService extends Service {
     /** Private reusable PTY for tools invoked from chat. Isolated from typed user commands. */
     private final Object toolLock=new Object();
     private Session agentSession;
+    private Session chatSession;
+    private volatile boolean cancelAgentRequested;
 
     public final class LocalBinder extends Binder {
         public TerminalService getService(){return TerminalService.this;}
@@ -138,6 +140,23 @@ public final class TerminalService extends Service {
         new Thread(()->readLoop(session),"arabic-pty-read-"+session.name).start();
         return session;
     }
+    /** The chat sheet renders the SAME live Alpine PTY display and sends raw key input. */
+    public synchronized Session openChatSession() throws IOException {
+        if(chatSession==null || chatSession.finished || !sessions.contains(chatSession)){
+            chatSession=create(false,true,24,100);
+        }
+        return chatSession;
+    }
+    public String renderChatSession(Session session) {
+        if(session==null || session.finished) return "الجلسة متوقفة";
+        return session.display.render();
+    }
+    /** Interrupt the model's private PTY without killing a user's interactive shell. */
+    public void cancelAgentCommand() {
+        cancelAgentRequested=true;
+        Session active=agentSession;
+        if(active!=null) write(active,"\u0003");
+    }
     /**
      * Run an explicitly authorized command in the SAME Alpine/PRoot PTY engine
      * used by the Arabic Terminal UI. Results are written inside app-private
@@ -153,6 +172,8 @@ public final class TerminalService extends Service {
             throw new IOException("Invalid terminal command");
         int seconds=Math.max(2,Math.min(60,timeoutSeconds));
         synchronized(toolLock){
+            cancelAgentRequested=false;
+            boolean aborted=false;
             try { LinuxEnvironment.install(this); }
             catch(Exception error) {
                 throw new IOException("Unable to prepare verified Alpine runtime",error);
@@ -176,11 +197,14 @@ public final class TerminalService extends Service {
             long until=android.os.SystemClock.elapsedRealtime()+seconds*1000L;
             try{
                 while(!done.isFile()){
-                    if(Thread.currentThread().isInterrupted())throw new InterruptedException();
+                    if(Thread.currentThread().isInterrupted() || cancelAgentRequested){
+                        aborted=true;
+                        throw new InterruptedException("تم إيقاف أمر الوكيل");
+                    }
                     if(agentSession.finished)throw new IOException("Arabic Terminal PTY closed");
                     if(android.os.SystemClock.elapsedRealtime()>until){
-                        write(agentSession,"\u0003");
-                        return "انتهت مهلة الأمر بعد "+seconds+" ثانية. لم يتم التأكد من اكتماله.";
+                        aborted=true;
+                        return "timeout=true\\nانتهت مهلة الأمر بعد "+seconds+" ثانية؛ أُلغي تنفيذ جلسة الأمر.";
                     }
                     Thread.sleep(100);
                 }
@@ -197,6 +221,10 @@ public final class TerminalService extends Service {
                 }
                 return "exit_code="+code+"\n"+output;
             }finally{
+                if(aborted && agentSession!=null){
+                    close(agentSession);
+                    agentSession=null; // prevent the next command from entering an uncertain shell
+                }
                 java.nio.file.Files.deleteIfExists(done.toPath());
                 java.nio.file.Files.deleteIfExists(result.toPath());
             }
@@ -208,6 +236,7 @@ public final class TerminalService extends Service {
 
     public void close(Session session){
         if(session==agentSession)agentSession=null;
+        if(session==chatSession)chatSession=null;
         if(session==null || !sessions.remove(session))return;
         synchronized(session.mutex){
             if(!session.finished)NativePty.terminate(session.handle);
