@@ -8,7 +8,6 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import io.musab.arabicterminal.ArabicCommandRouter
 import io.musab.arabicterminal.LinuxEnvironment
-import io.musab.arabicterminal.MainActivity
 import io.musab.arabicterminal.PhoneController
 import io.musab.arabicterminal.TerminalService
 import kotlinx.coroutines.CompletableDeferred
@@ -21,6 +20,8 @@ import org.json.JSONObject
  * that the Arabic Terminal already uses. Never a fake console or Termux API.
  */
 class M4NativeTools(private val app: Application) {
+    @Volatile private var currentService: TerminalService? = null
+    fun cancelTerminalCommand() { currentService?.cancelAgentCommand() }
     companion object {
         private val terminalOnlySuffix = Regex(
             """\s+(?:باستخدام|عبر|عن طريق|من خلال|بواسطة)\s+(?:الطرفية|الترمينال|طرفيتك|terminal)\s*[.!؟]*$""",
@@ -29,11 +30,21 @@ class M4NativeTools(private val app: Application) {
 
         fun quickAction(userText: String): String? {
             val cleaned = userText.trim().replace(terminalOnlySuffix, "").trim()
+            // Decompose compound actions before the generic OPEN_APP parser
+            // mistakes an entire instruction for an app name.
+            WhatsAppPlanner.parse(cleaned)?.let { return it.asAction() }
             val normalized = ArabicCommandRouter.normalize(cleaned)
+            if ((normalized.contains("واتس") || normalized.contains("whatsapp")) &&
+                listOf("ارسل","ابعت","ابعث","ابريل","اريل","رسالة").any {
+                    normalized.contains(it)
+                }) return "whatsapp_unparsed"
             if (normalized in listOf("اربط github", "ربط github", "اتصل ب github",
                     "وصل github", "ربط جيت هاب", "اربط جيت هاب",
                     "connect github", "github login")) return "github_connect"
             val parsed = ArabicCommandRouter.parse(cleaned)
+            if (parsed.kind == ArabicCommandRouter.Kind.SHELL &&
+                cleaned.firstOrNull()?.let { it in '\u0600'..'\u06FF' } == true)
+                return "shell:" + parsed.command
             return when (parsed.kind) {
                 ArabicCommandRouter.Kind.OPEN_APP,
                 ArabicCommandRouter.Kind.OPEN_SYSTEM_APP,
@@ -47,18 +58,26 @@ class M4NativeTools(private val app: Application) {
 
     suspend fun performQuick(action: String): String = withContext(Dispatchers.Main) {
         if (action == "github_connect") return@withContext githubConnect()
+        if (action.startsWith("shell:")) return@withContext "يتطلب أمر Linux موافقة منفصلة."
+        if (action == "whatsapp_unparsed") return@withContext "هذا طلب رسالة واتساب، وليس اسم تطبيق. أحتاج نص الرسالة واسم المستلم بوضوح؛ لم أرسل شيئًا."
+        val whatsapp=WhatsAppPlanner.fromAction(action)
+        if (whatsapp!=null) return@withContext PhoneController.prepareWhatsAppDraft(
+            app, whatsapp.recipient, whatsapp.body
+        )
         if (!action.startsWith("native:")) return@withContext "أمر غير مدعوم."
         PhoneController.run(app, ArabicCommandRouter.parse(action.removePrefix("native:")))
     }
 
     suspend fun execute(name: String, args: JSONObject, userRequest: String,
-                        approvedShell: Boolean): String {
+                        approvedShell: Boolean, onOutput: (String) -> Unit = {}): String {
         return when (name) {
             "open_app" -> {
                 val target=args.optString("name","").trim().take(100)
                 if (target.isEmpty()) "اسم التطبيق غير موجود."
                 else if (!explicitOpenIntent(userRequest))
                     "لا يمكن فتح التطبيقات دون طلب واضح من المستخدم."
+                else if (WhatsAppPlanner.looksLikeMessageRequest(userRequest))
+                    "رفضت فتح تطبيق باسم جملة كاملة؛ هذا طلب رسالة واتساب. حدد المستلم والنص لتجهيز المسودة."
                 else withContext(Dispatchers.Main) {
                     PhoneController.run(app,ArabicCommandRouter.parse("افتح تطبيق " + target))
                 }
@@ -70,6 +89,19 @@ class M4NativeTools(private val app: Application) {
                     "لم يطلب المستخدم استعراض التطبيقات المثبتة؛ لن أرسل قائمة التطبيقات إلى مزود خارجي."
                 } else withContext(Dispatchers.Main) {
                     PhoneController.run(app,ArabicCommandRouter.parse("اعرض التطبيقات")).take(5000)
+                }
+            }
+            "prepare_whatsapp_draft" -> {
+                val normalized=ArabicCommandRouter.normalize(userRequest)
+                if (!(normalized.contains("واتس") || normalized.contains("whatsapp")) ||
+                    !listOf("ارسل","ابعت","ابعث","رسالة").any { normalized.contains(it) }) {
+                    "لا يوجد طلب صريح لإعداد رسالة واتساب."
+                } else {
+                    val who=args.optString("recipient","").trim().take(100)
+                    val body=args.optString("message","").trim().take(2000)
+                    withContext(Dispatchers.Main) {
+                        PhoneController.prepareWhatsAppDraft(app,who,body)
+                    }
                 }
             }
             "github_connect" -> {
@@ -89,9 +121,9 @@ class M4NativeTools(private val app: Application) {
                 if (!approvedShell) "رفض المستخدم الإذن بتنفيذ الأمر."
                 else if (command.isEmpty() || command.length>2000 || command.contains('\u0000'))
                     "الأمر فارغ أو أطول من المسموح."
-                else if (Regex("""(?i)(gh\\s+auth\\s+token|cat\\s+.*(\\.ssh|hosts\\.yml|\\.env)|printenv|(^|\\s)env($|\\s))""").containsMatchIn(command))
+                else if (Regex("""(?i)(gh\s+auth\s+token|cat\s+.*(\.ssh|hosts\.yml|\.env)|printenv|(^|\s)env($|\s))""").containsMatchIn(command))
                     "رفض قراءة أو عرض مفاتيح الاعتماد."
-                else executeTerminal(command, 45)
+                else executeTerminal(command, args.optInt("timeout_seconds",90).coerceIn(5,180), onOutput)
             }
             else -> "هذه الأداة غير موجودة في M4: " + name
         }
@@ -110,15 +142,11 @@ class M4NativeTools(private val app: Application) {
                 n.contains("connect") || n.contains("login"))
     }
 
-    private fun githubConnect(): String {
-        app.startActivity(Intent(app, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            .putExtra(MainActivity.EXTRA_GITHUB_LOGIN,true))
-        return "فُتحت الطرفية العربية لإجراء تسجيل دخول GitHub الرسمي عبر gh auth login. " +
-               "اتبع تعليمات رمز الجهاز؛ لا تضع رمز وصولك في المحادثة."
-    }
+    private fun githubConnect(): String =
+        "اربط GitHub من لوحة الطرفية التفاعلية داخل المحادثة باستخدام gh auth login؛ لا تشارك الرموز في الرسائل."
 
-    private suspend fun executeTerminal(command: String, seconds: Int): String {
+    private suspend fun executeTerminal(command: String, seconds: Int,
+                                        onOutput: (String) -> Unit = {}): String {
         // Prepare the same bundled Alpine filesystem used by MainActivity.
         // The first startup can take time while extracting verified assets.
         withContext(Dispatchers.IO) { LinuxEnvironment.install(app) }
@@ -143,10 +171,12 @@ class M4NativeTools(private val app: Application) {
                 if (!bound) throw IllegalStateException("لا يمكن ربط خدمة الطرفية.")
             }
             val service=withTimeout(10000) { ready.await() }
+            currentService=service
             return withContext(Dispatchers.IO) {
-                service.runAgentCommand(command,seconds).take(25000)
+                service.runAgentCommand(command, seconds) { part -> onOutput(part) }.take(25000)
             }
         } finally {
+            currentService=null
             if (bound) withContext(Dispatchers.Main) {
                 try { app.unbindService(connection) } catch (_: IllegalArgumentException) {}
             }

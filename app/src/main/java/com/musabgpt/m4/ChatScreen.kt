@@ -1,5 +1,8 @@
 package com.musabgpt.m4
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -92,9 +96,6 @@ private fun greeting(): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
-    openTerminal: () -> Unit,
-    connectGithub: () -> Unit,
-    runAgent: (String) -> Unit,
     readAgentProgress: () -> AgentProgress?,
     vm: ChatViewModel = viewModel()
 ) {
@@ -105,6 +106,13 @@ fun ChatScreen(
     val providerIndex by vm.providerIndex.collectAsState()
     val activeRoute by vm.activeRoute.collectAsState()
     val approval by vm.approval.collectAsState()
+    val contactPermissionTicket by vm.contactsPermissionTicket.collectAsState()
+    val contactPermissionLauncher=rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> vm.onContactsPermissionResult(granted) }
+    LaunchedEffect(contactPermissionTicket) {
+        if(contactPermissionTicket>0) contactPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+    }
     val provider = providers[providerIndex.coerceIn(providers.indices)]
     val current = conversations.firstOrNull { it.id == currentId } ?: conversations.first()
 
@@ -116,81 +124,9 @@ fun ChatScreen(
     var showAgentConfirm by remember { mutableStateOf(false) }
     var showAgentProgress by remember { mutableStateOf(false) }
     var agentProgress by remember { mutableStateOf<AgentProgress?>(null) }
-
-
-    if (approval != null) {
-        val pending=approval!!
-        AlertDialog(
-            onDismissRequest = { vm.decideTool(false) },
-            title = { Text("موافقة على أمر الطرفية العربية") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Text("النموذج يطلب تشغيل أمر حقيقي في Alpine داخل التطبيق. راجع الأمر قبل السماح؛ قد تُرسل نتيجة تنفيذه إلى مزود النموذج المجاني. لا تسمح بأوامر تكشف كلمات المرور أو الرموز.")
-                    Surface(
-                        color = colors.surfaceVariant,
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text(pending.command.take(2000), fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
-                            modifier = Modifier.padding(12.dp))
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { vm.decideTool(true) }) { Text("السماح لهذا الأمر") }
-            },
-            dismissButton = {
-                TextButton(onClick = { vm.decideTool(false) }) { Text("رفض") }
-            }
-        )
-    }
-    if (showAgentConfirm) {
-        AlertDialog(
-            onDismissRequest = { showAgentConfirm = false },
-            title = { Text("تنفيذ المهمة في الطرفية العربية") },
-            text = { Text("سيعمل وكيل M4 على ملفات المشروع باستخدام Alpine المدمجة. قد ينفذ أوامر تغيّر الملفات؛ راجع المشروع واحفظ نسخك المهمة.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showAgentConfirm = false
-                    if (input.isNotBlank()) {
-                        runAgent(input.trim())
-                        input = ""
-                    }
-                }) { Text("تشغيل") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAgentConfirm = false }) { Text("إلغاء") }
-            }
-        )
-    }
-    if (showAgentProgress) {
-        AlertDialog(
-            onDismissRequest = { showAgentProgress = false },
-            title = { Text("حالة وكيل M4") },
-            text = {
-                val a = agentProgress
-                if (a == null) Text("لا توجد مهمة محفوظة حتى الآن.")
-                else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(a.displayPhase)
-                    Text("الخطوات: " + a.steps)
-                    if (a.goal.isNotBlank()) Text(a.goal)
-                    if (a.summary.isNotBlank()) Text(a.summary)
-                }
-            },
-            confirmButton = {
-                Row {
-                    TextButton(onClick = { agentProgress = readAgentProgress() }) { Text("تحديث") }
-                    if (agentProgress?.canResume == true) {
-                        TextButton(onClick = {
-                            val goal = agentProgress?.goal.orEmpty()
-                            showAgentProgress = false
-                            if (goal.isNotBlank()) runAgent(goal)
-                        }) { Text("استئناف") }
-                    }
-                }
-            },
-            dismissButton = { TextButton(onClick = { showAgentProgress = false }) { Text("إغلاق") } }
-        )
+    val backgroundTaskRunning by vm.backgroundTaskRunning.collectAsState()
+    fun launchTerminal(command: String? = null) {
+        vm.launchTerminal(command)
     }
 
     ModalNavigationDrawer(
@@ -233,7 +169,7 @@ fun ChatScreen(
                 HorizontalDivider()
                 TextButton(onClick = {
                     scope.launch { drawerState.close() }
-                    openTerminal()
+                    launchTerminal()
                 }, modifier = Modifier.padding(12.dp)) {
                     Icon(Icons.Filled.Terminal, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -241,7 +177,7 @@ fun ChatScreen(
                 }
                 TextButton(onClick = {
                     scope.launch { drawerState.close() }
-                    connectGithub()
+                    launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
                 }, modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
                     Icon(Icons.Filled.Link, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -290,12 +226,9 @@ fun ChatScreen(
                     actions = {
                         IconButton(onClick = {
                             agentProgress = readAgentProgress()
-                            showAgentProgress = true
+                            showAgentProgress = !showAgentProgress
                         }) {
                             Icon(Icons.Filled.Info, contentDescription = "حالة الوكيل")
-                        }
-                        IconButton(onClick = openTerminal) {
-                            Icon(Icons.Filled.Terminal, contentDescription = "الطرفية العربية")
                         }
                         IconButton(onClick = vm::newChat) {
                             Icon(Icons.Filled.Add, contentDescription = "محادثة جديدة")
@@ -305,6 +238,87 @@ fun ChatScreen(
             },
             bottomBar = {
                 Column {
+                    if(showAgentConfirm) {
+                        Surface(
+                            color=colors.surfaceVariant,
+                            shape=RoundedCornerShape(12.dp),
+                            modifier=Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=5.dp)
+                        ) {
+                            Column(Modifier.padding(12.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                                Text("بدء وكيل M4 الحقيقي عبر Alpine؟ سيراجع الملفات وقد يغيّرها. احتفظ بنسخة من مشروعك.",
+                                    fontSize=12.sp)
+                                Row(horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                                    TextButton(onClick={showAgentConfirm=false}) { Text("إلغاء") }
+                                    TextButton(onClick={
+                                        showAgentConfirm=false
+                                        if(input.isNotBlank()) {
+                                            launchTerminal("m4-agent-start "+shellQuoteGoal(input.trim()))
+                                            input=""
+                                        }
+                                    }) { Text("ابدأ المهمة") }
+                                }
+                            }
+                        }
+                    }
+                    if(approval!=null) {
+                        val pending=approval!!
+                        Surface(
+                            color=colors.surfaceVariant,
+                            shape=RoundedCornerShape(12.dp),
+                            modifier=Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=5.dp)
+                        ) {
+                            Column(Modifier.padding(12.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                                Text("النموذج يطلب تشغيل أمر Linux حقيقي. اقرأه أولاً؛ قد يرسل المزوّد نتيجة تنفيذه.",
+                                    fontSize=12.sp)
+                                Text(pending.command.take(1600), fontFamily=FontFamily.Monospace,
+                                    fontSize=12.sp)
+                                Row {
+                                    TextButton(onClick={vm.decideTool(false)}) { Text("رفض") }
+                                    TextButton(onClick={vm.decideTool(true)}) { Text("اسمح مرة") }
+                                    TextButton(onClick={vm.decideTool(true,approveTask=true)}) {
+                                        Text("اسمح للمهمة")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if(showAgentProgress) {
+                        val progress=agentProgress
+                        Surface(
+                            color=colors.surfaceVariant,
+                            shape=RoundedCornerShape(12.dp),
+                            modifier=Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=5.dp)
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text(progress?.displayPhase ?: "لم تُسجّل مهمة بعد.",fontSize=13.sp)
+                                if(progress!=null) {
+                                    Text("خطوات: "+progress.steps,fontSize=12.sp)
+                                    if(progress.summary.isNotBlank()) Text(progress.summary,fontSize=12.sp)
+                                }
+                                Row {
+                                    TextButton(onClick={agentProgress=readAgentProgress()}) { Text("تحديث") }
+                                    if(progress?.canResume==true) {
+                                        TextButton(onClick={
+                                            val goal=progress.goal
+                                            showAgentProgress=false
+                                            if(goal.isNotBlank()) launchTerminal(
+                                                "m4-agent-start "+shellQuoteGoal(goal)
+                                            )
+                                        }) { Text("استئناف") }
+                                    }
+                                    TextButton(onClick={showAgentProgress=false}) { Text("إخفاء") }
+                                }
+                            }
+                        }
+                    }
+                    if (backgroundTaskRunning) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),
+                            verticalAlignment=Alignment.CenterVertically) {
+                            Text("Alpine يعمل في هذه المحادثة",
+                                modifier=Modifier.weight(1f), color=colors.onSurfaceVariant)
+                            TextButton(onClick={vm.stopBackgroundTask()}) { Text("إيقاف") }
+                        }
+                    }
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 15.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -319,7 +333,7 @@ fun ChatScreen(
                         )
                         TextButton(
                             onClick = { showAgentConfirm = true },
-                            enabled = input.isNotBlank() && !isStreaming
+                            enabled = input.isNotBlank() && !isStreaming && !backgroundTaskRunning
                         ) {
                             Icon(Icons.Filled.Code, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
@@ -329,6 +343,7 @@ fun ChatScreen(
                     InputBar(
                         text = input,
                         onTextChange = { input = it },
+                        hint = "اكتب رسالتك (أو ! ثم أمر Linux)...",
                         isStreaming = isStreaming,
                         onSend = {
                             vm.send(input)
@@ -522,6 +537,7 @@ private fun ThinkingDot() {
 private fun InputBar(
     text: String,
     onTextChange: (String) -> Unit,
+    hint: String,
     isStreaming: Boolean,
     onSend: () -> Unit,
     onStop: () -> Unit
@@ -556,7 +572,7 @@ private fun InputBar(
                     decorationBox = { inner ->
                         Box {
                             if (text.isEmpty()) {
-                                Text("اكتب رسالتك...", fontSize = 16.sp, color = colors.onSurfaceVariant)
+                                Text(hint, fontSize = 16.sp, color = colors.onSurfaceVariant)
                             }
                             inner()
                         }
@@ -636,3 +652,5 @@ private fun inline(text: String, codeBg: Color): AnnotatedString = buildAnnotate
         i++
     }
 }
+/** Avoid shell injection when passing user text to the bundled M4 coding agent. */
+private fun shellQuoteGoal(value: String): String = "'" + value.replace("'", "'\\''") + "'"

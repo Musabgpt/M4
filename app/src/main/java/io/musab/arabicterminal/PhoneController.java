@@ -1,11 +1,14 @@
 package io.musab.arabicterminal;
 
+import android.Manifest;
 import android.content.Context;
+import android.database.Cursor;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.provider.MediaStore;
+import android.provider.ContactsContract;
 import android.provider.Settings;
 
 import java.util.ArrayList;
@@ -135,6 +138,73 @@ public final class PhoneController {
         start(ctx,launch);
         return "تم إرسال أمر فتح «"+chosen.label+"» إلى أندرويد.";
     }
+    /**
+     * Create a WhatsApp draft in the user's intended conversation.
+     * Official Android/WhatsApp APIs cannot silently press Send; user must confirm
+     * inside WhatsApp. Names are resolved locally using optional READ_CONTACTS.
+     */
+    public static String prepareWhatsAppDraft(Context ctx,String recipient,String message){
+        if(recipient==null || message==null || recipient.trim().isEmpty() ||
+            message.trim().isEmpty() || recipient.length()>100 || message.length()>2000)
+            return "لا توجد جهة اتصال أو نص رسالة صالح.";
+        String phone=recipient.trim().replaceAll("[\\s()+\\-]","");
+        if(phone.startsWith("00"))phone=phone.substring(2);
+        if(!phone.matches("[0-9]{8,15}")){
+            if(ctx.checkSelfPermission(Manifest.permission.READ_CONTACTS)!=PackageManager.PERMISSION_GRANTED)
+                return "فهمت أنك تريد إرسال «"+message+"» إلى «"+recipient+
+                    "» عبر واتساب. أحتاج إذن جهات الاتصال للعثور على الرقم محلياً، أو اكتب رقمه مع رمز البلد.";
+            try {
+                String match=null;
+                String target=ArabicCommandRouter.normalize(recipient);
+                String[] columns={
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                };
+                try(Cursor cursor=ctx.getContentResolver().query(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,columns,
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME+" LIKE ?",
+                    new String[]{"%"+recipient+"%"},null)){
+                    if(cursor!=null)while(cursor.moveToNext()){
+                        String name=cursor.getString(0);
+                        if(!ArabicCommandRouter.normalize(name).equals(target))continue;
+                        String number=cursor.getString(1);
+                        if(number==null)continue;
+                        number=number.replaceAll("[^0-9+]","");
+                        if(number.startsWith("00"))number=number.substring(2);
+                        if(number.startsWith("+"))number=number.substring(1);
+                        if(!number.matches("[0-9]{8,15}"))continue;
+                        if(match!=null && !match.equals(number))
+                            return "وجدت أكثر من رقم لجهة «"+recipient+
+                                "». حدّد رقم الهاتف حتى لا أختار الشخص الخطأ.";
+                        match=number;
+                    }
+                }
+                if(match==null)return "فهمت الطلب، لكن لم أجد رقماً مؤكداً لجهة «"+
+                    recipient+"». اكتب رقمها الدولي لتجهيز الرسالة دون تخمين.";
+                phone=match;
+            }catch(SecurityException e){
+                return "تعذّر الوصول لجهات الاتصال. يلزم إذن Android أو رقم هاتف واضح.";
+            }
+        }
+        if(!phone.matches("[0-9]{8,15}"))return "رقم غير صالح. استخدم الرقم الدولي مع رمز البلد.";
+        if(phone.startsWith("0"))return "الرقم محلي ولا يحتوي رمز البلد. اكتب الرقم الدولي لتجنب مراسلة جهة خاطئة.";
+        Uri link=new Uri.Builder().scheme("whatsapp").authority("send")
+            .appendQueryParameter("phone",phone)
+            .appendQueryParameter("text",message).build();
+        Intent launch=new Intent(Intent.ACTION_VIEW,link).setPackage("com.whatsapp");
+        try {
+            start(ctx,launch);
+        }catch(android.content.ActivityNotFoundException e){
+            launch.setPackage("com.whatsapp.w4b");
+            try { start(ctx,launch); }
+            catch(android.content.ActivityNotFoundException fallback){
+                return "تعذر فتح محادثة واتساب. تأكد أن واتساب مثبت على الهاتف.";
+            }
+        }
+        return "تم فتح مسودة واتساب إلى «"+recipient+"» بنص «"+message+
+            "». راجع المستلم واضغط إرسال بنفسك؛ لم تُرسل الرسالة تلقائياً.";
+    }
+
     private static String openSystem(Context ctx,String id){
         Intent i;
         switch(id){

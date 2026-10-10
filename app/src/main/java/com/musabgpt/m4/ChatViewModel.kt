@@ -1,12 +1,16 @@
 package com.musabgpt.m4
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -54,15 +58,144 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val streaming = _streaming.asStateFlow()
     private var job: Job? = null
     private val nativeTools=M4NativeTools(app)
+    // Alpine runs as a background engine. The chat composer never changes mode.
+    private val inChatTerminal=InChatTerminal(app)
+    private val _backgroundTaskRunning=MutableStateFlow(false)
+    val backgroundTaskRunning=_backgroundTaskRunning.asStateFlow()
+    private var terminalMonitorJob: Job?=null
+    private var liveTerminalMessageId: String?=null
+    private var backgroundConversationId: String?=null
+    private var terminalReady=false
+    private val queuedTerminalLines=ArrayDeque<String>()
+    private fun sendTerminalLine(line: String) {
+        if (!terminalReady) {
+            queuedTerminalLines.addLast(line)
+            return
+        }
+        if (line.startsWith("m4-agent-start ")) inChatTerminal.configureAgent(selected.id)
+        inChatTerminal.writeLine(line)
+    }
+    private data class PendingWhatsApp(val action: String, val conversationId: String, val replyId: String)
+    private var pendingWhatsApp: PendingWhatsApp?=null
+    private val _contactsPermissionTicket=MutableStateFlow(0)
+    val contactsPermissionTicket=_contactsPermissionTicket.asStateFlow()
+    fun onContactsPermissionResult(allowed: Boolean) {
+        val pending=pendingWhatsApp ?: return
+        pendingWhatsApp=null
+        viewModelScope.launch {
+            val result=if(allowed) nativeTools.performQuick(pending.action)
+                else "لم أتمكن من العثور على المستلم بدون إذن جهات الاتصال. يمكنك كتابة رقم الهاتف الدولي بدلاً من ذلك."
+            edit(pending.conversationId) { conv -> conv.copy(messages=conv.messages.map {
+                if(it.id==pending.replyId) it.copy(content=result) else it
+            }) }
+            saveHistory()
+        }
+    }
     private val prompt by lazy {
         app.assets.open("m4-chat-system.txt").bufferedReader(Charsets.UTF_8).use { it.readText() }
     }
     private val _approval=MutableStateFlow<ToolApproval?>(null)
     val approval=_approval.asStateFlow()
+    private val _terminalOutput=MutableStateFlow("")
+    val terminalOutput=_terminalOutput.asStateFlow()
+    private var taskApprovedCommands=0
+    /**
+     * Run user-requested interactive Alpine tasks IN a chat message, not as a
+     * terminal mode, a sheet or a new screen. A final shell sentinel lets the
+     * monitor stop when the command actually completes.
+     */
+    fun launchTerminal(command: String? = null) {
+        if (command.isNullOrBlank()) return
+        val convId=_currentId.value
+        if (_backgroundTaskRunning.value) {
+            edit(convId) { it.copy(messages=it.messages+UiMessage(role="assistant",
+                content="هناك مهمة Alpine قيد التشغيل. انتظر اكتمالها أو أوقفها قبل بدء مهمة ثانية.")) }
+            return
+        }
+        _backgroundTaskRunning.value=true
+        backgroundConversationId=convId
+        terminalReady=false
+        queuedTerminalLines.clear()
+        val marker="__M4_TASK_DONE_"+UUID.randomUUID().toString().replace("-","")+"__"
+        val decorated=command+"; printf '\\n"+marker+":%s\\n' \"$?\""
+        val terminalMessage=UiMessage(role="terminal",
+            content="```sh\n⏳ جاري تجهيز Alpine Linux وتشغيل المهمة...\n```")
+        liveTerminalMessageId=terminalMessage.id
+        edit(convId) { it.copy(messages=it.messages+terminalMessage) }
+        terminalMonitorJob?.cancel()
+        terminalMonitorJob=viewModelScope.launch {
+            try {
+                inChatTerminal.connect()
+                terminalReady=true
+                if (command.startsWith("m4-agent-start ")) inChatTerminal.configureAgent(selected.id)
+                // New run must not inherit the previous interactive terminal screen.
+                inChatTerminal.writeLine("clear")
+                inChatTerminal.writeLine(decorated)
+                while (queuedTerminalLines.isNotEmpty()) sendTerminalLine(queuedTerminalLines.removeFirst())
+                var lastScreen=""
+                val completed=Regex("(?m)^"+Regex.escape(marker)+":([0-9]+)\\s*$")
+                while (isActive && _backgroundTaskRunning.value) {
+                    val screen=inChatTerminal.screen()
+                    val status=completed.find(screen)
+                    val display=screen.replace(completed,"").trimEnd().takeLast(6500)
+                    if (display!=lastScreen || status!=null) {
+                        lastScreen=display
+                        val header=when {
+                            status==null -> "⏳ تنفيذ Alpine جارٍ..."
+                            status.groupValues[1]=="0" -> "✅ انتهى التنفيذ (exit 0)"
+                            else -> "⚠️ انتهى التنفيذ (exit "+status.groupValues[1]+")"
+                        }
+                        val formatted=header+"\n```sh\n"+display+"\n```"
+                        edit(convId) { conv -> conv.copy(messages=conv.messages.map {
+                            if (it.id==terminalMessage.id) it.copy(content=formatted) else it
+                        }) }
+                    }
+                    if (status!=null) {
+                        _backgroundTaskRunning.value=false
+                        break
+                    }
+                    delay(250)
+                }
+            } catch (_: CancellationException) {
+                // The user cancelled the task.
+            } catch (e: Exception) {
+                edit(convId) { conv -> conv.copy(messages=conv.messages.map {
+                    if (it.id==terminalMessage.id)
+                        it.copy(content="تعذّر تنفيذ Alpine: "+(e.message?:"خطأ غير معروف"))
+                    else it
+                }) }
+            } finally {
+                terminalReady=false
+                queuedTerminalLines.clear()
+                _backgroundTaskRunning.value=false
+                liveTerminalMessageId=null
+                backgroundConversationId=null
+                saveHistory()
+            }
+        }
+    }
+
+    fun stopBackgroundTask() {
+        if (!_backgroundTaskRunning.value) return
+        inChatTerminal.sendControl("\u0003")
+        val id=liveTerminalMessageId
+        if (id!=null) edit(backgroundConversationId ?: _currentId.value) { conv -> conv.copy(messages=conv.messages.map {
+            if (it.id==id) it.copy(content=it.content+"\n⏹️ أوقف المستخدم المهمة.") else it
+        }) }
+        terminalMonitorJob?.cancel()
+        terminalMonitorJob=null
+        backgroundConversationId=null
+        _backgroundTaskRunning.value=false
+        terminalReady=false
+        queuedTerminalLines.clear()
+        saveHistory()
+    }
+
     val selected: Provider get() = _providers.value[_providerIndex.value]
 
-    fun decideTool(approved: Boolean) {
+    fun decideTool(approved: Boolean, approveTask: Boolean = false) {
         val pending=_approval.value ?: return
+        if(approved && approveTask) taskApprovedCommands=11 // first + up to 11 further calls
         if(!pending.decision.isCompleted)pending.decision.complete(approved)
         _approval.value=null
     }
@@ -116,7 +249,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun stop() {
         decideTool(false)
+        taskApprovedCommands=0
         ChatApi.stop()
+        nativeTools.cancelTerminalCommand()
         job?.cancel()
     }
 
@@ -127,6 +262,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String) {
         val clean = text.trim()
         if (clean.isEmpty() || _streaming.value) return
+        if (clean.startsWith("!")) {
+            val cmd=clean.removePrefix("!").trim()
+            if (cmd.isNotBlank()) {
+                val id=_currentId.value
+                edit(id) { it.copy(messages=it.messages+
+                    UiMessage(role="user",content=clean)) }
+                if (_backgroundTaskRunning.value) {
+                    edit(id) { it.copy(messages=it.messages+UiMessage(role="assistant",
+                        content="هناك مهمة أخرى تعمل الآن؛ لن أمرّر الأمر إلى عملية تفاعلية قد تتلقى الإدخال خطأً. أوقف المهمة أو انتظر اكتمالها.")) }
+                } else launchTerminal(cmd)
+            }
+            return
+        }
         val convId = _currentId.value
         val reply = UiMessage(role = "assistant", content = "")
         edit(convId) { c ->
@@ -136,13 +284,31 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         saveHistory()
         val conv = _conversations.value.first { it.id == convId }
         val history = conv.messages.dropLast(1).map { ChatMessage(it.role, it.content) }
+        taskApprovedCommands=0
+        _terminalOutput.value=""
         val primary=selected
+        var toolLogMessageId: String?=null
         val quick=M4NativeTools.quickAction(clean)
         _activeRoute.value=if(quick!=null) "أدوات أندرويد المحلية" else "جاري الاتصال..."
         _streaming.value=true
         job=viewModelScope.launch {
             val buffer=StringBuilder()
             var lastFlush=0L
+            fun appendOutput(chunk: String) {
+                val limited=chunk.takeLast(1500)
+                if(limited.isBlank()) return
+                _terminalOutput.value=(_terminalOutput.value+limited).takeLast(8000)
+                val rendered="```sh\n"+_terminalOutput.value.replace("```","'''")+"\n```"
+                val id=toolLogMessageId
+                if(id==null) {
+                    val entry=UiMessage(role="terminal",content=rendered)
+                    toolLogMessageId=entry.id
+                    edit(convId) { it.copy(messages=it.messages+entry) }
+                } else edit(convId) { c -> c.copy(messages=c.messages.map {
+                    if(it.id==id) it.copy(content=rendered) else it
+                }) }
+                _activeRoute.value="Alpine: "+limited.takeLast(80).replace("\n"," ")
+            }
             fun flush() {
                 if(buffer.isEmpty())return
                 val portion=buffer.toString()
@@ -154,18 +320,55 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             try {
                 if(quick!=null) {
-                    buffer.append(nativeTools.performQuick(quick))
+                    if(quick.startsWith("shell:")) {
+                        val command=quick.removePrefix("shell:")
+                        val decision=CompletableDeferred<Boolean>()
+                        _approval.value=ToolApproval(command,decision)
+                        val allowed=try { withTimeout(120000) { decision.await() } }
+                            finally { _approval.value=null }
+                        if(!allowed) buffer.append("رفض المستخدم تنفيذ أمر Alpine المحلي.")
+                        else buffer.append(nativeTools.execute("terminal_command",
+                            JSONObject().put("command",command),clean,true) { chunk ->
+                            appendOutput(chunk)
+                        })
+                    } else if(quick=="github_connect") {
+                        launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
+                        buffer.append("بدأت عملية ربط GitHub داخل المحادثة. لا يعتبر الحساب مرتبطًا حتى تؤكد نتيجة تسجيل الدخول الفعلية.")
+                    } else if (quick.startsWith("whatsapp_draft:")) {
+                        val draft=WhatsAppPlanner.fromAction(quick)
+                        if (draft!=null && !WhatsAppPlanner.isPhone(draft.recipient) &&
+                            getApplication<Application>().checkSelfPermission(Manifest.permission.READ_CONTACTS)
+                                != PackageManager.PERMISSION_GRANTED) {
+                            pendingWhatsApp=PendingWhatsApp(quick,convId,reply.id)
+                            buffer.append("فهمت المهمة: إعداد رسالة واتساب إلى «")
+                                .append(draft.recipient).append("» بنص «")
+                                .append(draft.body).append("». أحتاج إذن جهات الاتصال للتأكد من رقم المستلم محلياً.")
+                            _contactsPermissionTicket.value++
+                        } else buffer.append(nativeTools.performQuick(quick))
+                    } else buffer.append(nativeTools.performQuick(quick))
                 } else {
                     ChatApi.stream(primary,history,prompt) { call ->
                         val shell=call.name=="terminal_command"
                         val approved=if(shell) {
-                            val command=call.arguments.optString("command","")
-                            val choice=CompletableDeferred<Boolean>()
-                            _approval.value=ToolApproval(command,choice)
-                            try { withTimeout(120000) { choice.await() } }
-                            finally { _approval.value=null }
+                            if(taskApprovedCommands>0) {
+                                taskApprovedCommands--
+                                true
+                            } else {
+                                val command=call.arguments.optString("command","")
+                                val choice=CompletableDeferred<Boolean>()
+                                _approval.value=ToolApproval(command,choice)
+                                try { withTimeout(120000) { choice.await() } }
+                                finally { _approval.value=null }
+                            }
                         } else false
-                        nativeTools.execute(call.name,call.arguments,clean,approved)
+                        if(call.name=="github_connect" &&
+                           (clean.contains("github",ignoreCase=true) ||
+                            clean.contains("جيت هاب") || clean.contains("غيتهاب"))) {
+                            launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
+                            "بدأ ربط GitHub عبر Alpine في المحادثة؛ لم يُتحقق من المصادقة بعد."
+                        } else nativeTools.execute(call.name,call.arguments,clean,approved) { chunk ->
+                            appendOutput(chunk)
+                        }
                     }.collect { event ->
                         when(event) {
                             is ChatEvent.Route -> _activeRoute.value="يعمل عبر: "+event.name
@@ -189,6 +392,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 buffer.append("تعذّرت المهمة: ").append((e.message ?: "فشل الاتصال").take(300))
             } finally {
                 flush()
+                taskApprovedCommands=0
                 _approval.value=null
                 _streaming.value=false
                 saveHistory()
@@ -198,6 +402,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         stop()
+        stopBackgroundTask()
+        inChatTerminal.disconnect()
         super.onCleared()
     }
 }

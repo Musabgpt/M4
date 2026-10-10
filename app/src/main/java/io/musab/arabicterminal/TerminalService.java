@@ -1,6 +1,7 @@
 package io.musab.arabicterminal;
 
 import android.app.Notification;
+import com.musabgpt.m4.M4ChatActivity;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -42,6 +43,8 @@ public final class TerminalService extends Service {
     /** Private reusable PTY for tools invoked from chat. Isolated from typed user commands. */
     private final Object toolLock=new Object();
     private Session agentSession;
+    private Session chatSession;
+    private volatile boolean cancelAgentRequested;
 
     public final class LocalBinder extends Binder {
         public TerminalService getService(){return TerminalService.this;}
@@ -85,7 +88,7 @@ public final class TerminalService extends Service {
         return START_STICKY;
     }
     private void startNotification(){
-        Intent open=new Intent(this,MainActivity.class);
+        Intent open=new Intent(this,M4ChatActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent go=PendingIntent.getActivity(this,0,open,
             PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
@@ -138,6 +141,23 @@ public final class TerminalService extends Service {
         new Thread(()->readLoop(session),"arabic-pty-read-"+session.name).start();
         return session;
     }
+    /** The chat sheet renders the SAME live Alpine PTY display and sends raw key input. */
+    public synchronized Session openChatSession() throws IOException {
+        if(chatSession==null || chatSession.finished || !sessions.contains(chatSession)){
+            chatSession=create(false,true,24,100);
+        }
+        return chatSession;
+    }
+    public String renderChatSession(Session session) {
+        if(session==null || session.finished) return "الجلسة متوقفة";
+        return session.display.render();
+    }
+    /** Interrupt the model's private PTY without killing a user's interactive shell. */
+    public void cancelAgentCommand() {
+        cancelAgentRequested=true;
+        Session active=agentSession;
+        if(active!=null) write(active,"\u0003");
+    }
     /**
      * Run an explicitly authorized command in the SAME Alpine/PRoot PTY engine
      * used by the Arabic Terminal UI. Results are written inside app-private
@@ -146,13 +166,21 @@ public final class TerminalService extends Service {
      */
     public String runAgentCommand(String command,int timeoutSeconds)
             throws IOException,InterruptedException {
+        return runAgentCommand(command,timeoutSeconds,chunk->{});
+    }
+    /** Streams bounded stdout chunks from the real PTY command file as they arrive. */
+    public String runAgentCommand(String command,int timeoutSeconds,
+            java.util.function.Consumer<String> onOutput)
+            throws IOException,InterruptedException {
         if(android.os.Looper.myLooper()==android.os.Looper.getMainLooper())
             throw new IOException("Terminal tool must run on a worker thread");
         if(command==null || command.isEmpty() || command.length()>4000 ||
                 command.indexOf('\u0000')>=0)
             throw new IOException("Invalid terminal command");
-        int seconds=Math.max(2,Math.min(60,timeoutSeconds));
+        int seconds=Math.max(2,Math.min(180,timeoutSeconds));
         synchronized(toolLock){
+            cancelAgentRequested=false;
+            boolean aborted=false;
             try { LinuxEnvironment.install(this); }
             catch(Exception error) {
                 throw new IOException("Unable to prepare verified Alpine runtime",error);
@@ -169,37 +197,66 @@ public final class TerminalService extends Service {
             java.io.File result=new java.io.File(guestRoot,nonce+".out");
             java.io.File done=new java.io.File(guestRoot,nonce+".exit");
             String path="/root/.m4-chat-tools/"+nonce;
-            String statement="sh -c "+shellQuote(command)+
-                " > "+shellQuote(path+".out")+" 2>&1; "+
-                "_m4_exit=$?; printf '%s' \"$_m4_exit\" > "+shellQuote(path+".exit")+"\n";
+            String cwdPath="/root/.m4-chat-tools/current.cwd";
+            // A child sh -c would normally lose 'cd' between tool calls.
+            // Save PWD inside the guest after each completed command and restore
+            // it on the next invocation in the same private Alpine workspace.
+            String script=TerminalCommandProtocol.wrap(command,cwdPath,
+                path+".exit","/root");
+            String statement="sh -c "+shellQuote(script)+
+                " > "+shellQuote(path+".out")+" 2>&1\n";
             write(agentSession,statement);
             long until=android.os.SystemClock.elapsedRealtime()+seconds*1000L;
+            long alreadyRead=0L;
+            StringBuilder captured=new StringBuilder();
             try{
                 while(!done.isFile()){
-                    if(Thread.currentThread().isInterrupted())throw new InterruptedException();
+                    if(Thread.currentThread().isInterrupted() || cancelAgentRequested){
+                        aborted=true;
+                        throw new InterruptedException("تم إيقاف أمر الوكيل");
+                    }
                     if(agentSession.finished)throw new IOException("Arabic Terminal PTY closed");
                     if(android.os.SystemClock.elapsedRealtime()>until){
-                        write(agentSession,"\u0003");
-                        return "انتهت مهلة الأمر بعد "+seconds+" ثانية. لم يتم التأكد من اكتماله.";
+                        aborted=true;
+                        return "timeout=true\\nانتهت مهلة الأمر بعد "+seconds+" ثانية؛ أُلغي تنفيذ جلسة الأمر.";
+                    }
+                    if(result.isFile() && alreadyRead<24576){
+                        long read=readAgentOutput(result,alreadyRead,captured,onOutput);
+                        alreadyRead+=read;
                     }
                     Thread.sleep(100);
                 }
+                if(result.isFile() && alreadyRead<24576){
+                    alreadyRead+=readAgentOutput(result,alreadyRead,captured,onOutput);
+                }
                 String code=new String(java.nio.file.Files.readAllBytes(done.toPath()),
                     java.nio.charset.StandardCharsets.UTF_8).trim();
-                String output="";
-                if(result.isFile()){
-                    // Read at most 24KiB; never flood the phone UI or model context.
-                    try(java.io.InputStream in=new java.io.FileInputStream(result)){
-                        byte[] bytes=new byte[24576];
-                        int len=in.read(bytes);
-                        if(len>0)output=new String(bytes,0,len,java.nio.charset.StandardCharsets.UTF_8);
-                    }
-                }
-                return "exit_code="+code+"\n"+output;
+                return "exit_code="+code+"\n"+captured.toString();
             }finally{
+                if(aborted && agentSession!=null){
+                    close(agentSession);
+                    agentSession=null; // prevent the next command from entering an uncertain shell
+                }
                 java.nio.file.Files.deleteIfExists(done.toPath());
                 java.nio.file.Files.deleteIfExists(result.toPath());
             }
+        }
+    }
+    private static long readAgentOutput(java.io.File result,long offset,
+            StringBuilder into,java.util.function.Consumer<String> onOutput) throws IOException {
+        long remaining=Math.min(24576-offset,result.length()-offset);
+        if(remaining<=0)return 0;
+        byte[] bytes=new byte[(int)Math.min(remaining,4096)];
+        try(java.io.RandomAccessFile stream=new java.io.RandomAccessFile(result,"r")){
+            stream.seek(offset);
+            int count=stream.read(bytes);
+            if(count<=0)return 0;
+            int complete=Utf8ChunkReader.completePrefix(bytes,count);
+            if(complete==0)return 0; // wait for the remaining UTF-8 bytes
+            String text=new String(bytes,0,complete,StandardCharsets.UTF_8);
+            into.append(text);
+            onOutput.accept(text);
+            return complete;
         }
     }
     private static String shellQuote(String value){
@@ -208,6 +265,7 @@ public final class TerminalService extends Service {
 
     public void close(Session session){
         if(session==agentSession)agentSession=null;
+        if(session==chatSession)chatSession=null;
         if(session==null || !sessions.remove(session))return;
         synchronized(session.mutex){
             if(!session.finished)NativePty.terminate(session.handle);
