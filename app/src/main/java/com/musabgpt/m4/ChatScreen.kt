@@ -92,9 +92,6 @@ private fun greeting(): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
-    openTerminal: () -> Unit,
-    connectGithub: () -> Unit,
-    runAgent: (String) -> Unit,
     readAgentProgress: () -> AgentProgress?,
     vm: ChatViewModel = viewModel()
 ) {
@@ -116,6 +113,23 @@ fun ChatScreen(
     var showAgentConfirm by remember { mutableStateOf(false) }
     var showAgentProgress by remember { mutableStateOf(false) }
     var agentProgress by remember { mutableStateOf<AgentProgress?>(null) }
+    var showTerminal by remember { mutableStateOf(false) }
+    var terminalCommand by remember { mutableStateOf<String?>(null) }
+    val terminalLaunch by vm.terminalLaunch.collectAsState()
+    LaunchedEffect(terminalLaunch) {
+        val requested=terminalLaunch ?: return@LaunchedEffect
+        terminalCommand=requested.command
+        showTerminal=true
+        vm.consumeTerminalLaunch(requested.id)
+    }
+    fun launchTerminal(command: String? = null) {
+        terminalCommand=command
+        showTerminal=true
+    }
+    if (showTerminal) {
+        EmbeddedTerminalSheet(initialCommand=terminalCommand,
+            onDismiss={ showTerminal=false; terminalCommand=null })
+    }
 
 
     if (approval != null) {
@@ -153,7 +167,7 @@ fun ChatScreen(
                 TextButton(onClick = {
                     showAgentConfirm = false
                     if (input.isNotBlank()) {
-                        runAgent(input.trim())
+                        launchTerminal("m4-agent-start " + shellQuoteGoal(input.trim()))
                         input = ""
                     }
                 }) { Text("تشغيل") }
@@ -184,7 +198,7 @@ fun ChatScreen(
                         TextButton(onClick = {
                             val goal = agentProgress?.goal.orEmpty()
                             showAgentProgress = false
-                            if (goal.isNotBlank()) runAgent(goal)
+                            if (goal.isNotBlank()) launchTerminal("m4-agent-start " + shellQuoteGoal(goal))
                         }) { Text("استئناف") }
                     }
                 }
@@ -233,7 +247,7 @@ fun ChatScreen(
                 HorizontalDivider()
                 TextButton(onClick = {
                     scope.launch { drawerState.close() }
-                    openTerminal()
+                    launchTerminal()
                 }, modifier = Modifier.padding(12.dp)) {
                     Icon(Icons.Filled.Terminal, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -241,7 +255,7 @@ fun ChatScreen(
                 }
                 TextButton(onClick = {
                     scope.launch { drawerState.close() }
-                    connectGithub()
+                    launchTerminal("gh auth login --hostname github.com --git-protocol https --web")
                 }, modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
                     Icon(Icons.Filled.Link, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -294,7 +308,7 @@ fun ChatScreen(
                         }) {
                             Icon(Icons.Filled.Info, contentDescription = "حالة الوكيل")
                         }
-                        IconButton(onClick = openTerminal) {
+                        IconButton(onClick = { launchTerminal() }) {
                             Icon(Icons.Filled.Terminal, contentDescription = "الطرفية العربية")
                         }
                         IconButton(onClick = vm::newChat) {
@@ -636,3 +650,5 @@ private fun inline(text: String, codeBg: Color): AnnotatedString = buildAnnotate
         i++
     }
 }
+/** Avoid shell injection when passing user text to the bundled M4 coding agent. */
+private fun shellQuoteGoal(value: String): String = "'" + value.replace("'", "'\\''") + "'"
