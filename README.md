@@ -43,3 +43,18 @@ The earlier NewAl-Cloud baseline package `dev.newal.code.lite` and standalone M4
 CI runs Python agent tests, Kotlin/Compose compilation, rootfs integrity and native build tests, and Android SDK/NDK debug APK construction. A successful CI build is not proof of on-device UX or free-route uptime. APK updates preserve old private files only when Android sees the **exact package and signer** match; M4's Linux runtime upgrades preserve user folders and task history. Signed release builds depend on the original private key, which cannot be retrieved from the public source repository or reconstructed from its certificate fingerprint.
 
 This distribution does not bundle local model weights, require root or ADB, give every gateway unauthorized access, or claim unlimited free service.
+
+
+## v2.1 — Native chat agent tools and fast Arabic actions
+
+Previous v2 chat requests were ordinary text-only completions and could misleadingly say it could not access the device. Starting v2.1, `ChatApi` **actually includes OpenAI-compatible tool definitions**. It accepts bounded streaming tool calls, passes them to `M4NativeTools`, returns real tool-role output to the model, and shows activity in chat. Non-tool-capable free routes remain a limitation. The chat **loads** `app/src/main/assets/m4-chat-system.txt`, an M4-specific condensed adaptation of the engineering workflow reference requested by the user. The separate Python coding agent still uses `agent/system_prompt.md`.
+
+A direct command such as `افتح واتساب` or `افتح واتساب باستخدام الطرفية` bypasses the internet/model entirely. It uses the **same ArabicCommandRouter and PhoneController** that powers the existing terminal. The user should see an attempted Android application launch immediately (device install state/OS restrictions may still reject it).
+
+For longer commands, the model can use `terminal_command`, which requires a **visible approval dialog for each command**, then runs inside M4's **actual Alpine PTY** managed by `TerminalService`, returning bounded stdout/stderr and exit status. It does not require switching to a terminal screen, Termux, ADB or Wi-Fi debugging. Initial Alpine unpacking can take time; actions are bounded to avoid hanging the phone. Tool-capable models can inspect files and Git this way, although arbitrary code execution is dangerous: review the requested command carefully.
+
+Open the conversation drawer and select **ربط GitHub رسمياً**. M4 opens its own Arabic Terminal and starts `gh auth login --hostname github.com --git-protocol https --web`. The user must complete the official GitHub device/browser login. After authentication, `gh auth status` and user-approved `git`/`gh` commands work inside the Alpine runtime. No GitHub token is bundled, put into an LLM prompt, or requested through a manual custom API form. Use the on-screen terminal for the device code if automatic browser open is unavailable.
+
+Latency optimizations: explicit phone actions need no network, route connection/first-token timeouts are shorter, failed routes cool down temporarily, output token rendering is batched in Compose, and the first response is checked for common Spanish intros when the user asked in Arabic. No guaranteed inference latency is claimed. Actual phone execution must still be checked on an Android ARM64 handset.
+
+**GitHub Actions:** On main, only the Android APK workflow auto-runs and uploads `ArabicTerminal-debug-APK`; Python/Kotlin standalone checks still run for PRs or manual dispatch and have no APK artifacts. Open [M4 actions](https://github.com/Musabgpt/M4/actions/workflows/android.yml) to download a build; the generic 'All workflows' page also contains non-APK workflows.

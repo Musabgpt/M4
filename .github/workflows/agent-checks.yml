@@ -1,7 +1,5 @@
 name: Agent core smoke tests
 on:
-  push:
-    branches: [main, feat/ai-agent-runtime]
   pull_request:
   workflow_dispatch:
 permissions:
