@@ -16,6 +16,6 @@ jobs:
         run: python3 -m unittest discover -s agent_tests -v
       - name: Python compile and script validation
         run: |
-          python3 -m py_compile agent/agent.py
-          python3 -m json.tool agent/tool-registry.json > /dev/null
-          bash -n agent/term-agent.sh agent/term-agent-addons.sh
+          python3 -m py_compile agent/agent.py agent/provider_routes.py
+          test -s agent/system_prompt.md
+          bash -n agent/term-agent.sh agent/m4-agent-start.sh agent/term-agent-watch.sh
