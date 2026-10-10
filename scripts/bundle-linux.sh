@@ -21,15 +21,17 @@ docker run --rm --network host \
     apk --root /opt/guest --arch aarch64 add --scripts=no --commit-hooks=no \
         python3 py3-pip git nodejs npm curl ca-certificates-bundle \
         bash coreutils findutils grep sed nano less tmux htop jq ripgrep \
-        procps openssh-client zip unzip file py3-pytest
-    for optional in github-cli tree-sitter-cli ast-grep; do
+        procps openssh-client zip unzip file py3-pytest github-cli
+    # GitHub CLI is required for the in-app OAuth device login.
+    test -x /opt/guest/usr/bin/gh
+    for optional in tree-sitter-cli ast-grep; do
         if apk --root /opt/guest --arch aarch64 add --scripts=no --commit-hooks=no "$optional"; then
             echo "Bundled Alpine developer tool: $optional"
         else
             echo "WARNING: optional Alpine developer tool unavailable: $optional" >&2
         fi
     done
-    apk --root /opt/guest --arch aarch64 info -e python3 git nodejs npm bash coreutils nano tmux
+    apk --root /opt/guest --arch aarch64 info -e python3 git nodejs npm bash coreutils nano tmux github-cli
     test -f /opt/guest/usr/bin/python3 || test -L /opt/guest/usr/bin/python3
     test -f /opt/guest/usr/bin/node || test -L /opt/guest/usr/bin/node
   '

@@ -42,6 +42,7 @@ jobs:
           test -s app/src/main/assets/alpine-rootfs.tgz
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/python3'
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/git'
+          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/gh'
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/node'
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/npm'
           tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/term-agent'
