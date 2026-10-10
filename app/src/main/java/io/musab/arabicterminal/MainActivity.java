@@ -298,27 +298,12 @@ public final class MainActivity extends Activity {
         try{
             android.content.SharedPreferences prefs=getSharedPreferences("m4_chats",MODE_PRIVATE);
             int index=prefs.getInt("provider",0);
-            String[] names={"Kilo Auto Free","Groq","Gemini","OpenRouter","Custom"};
-            String[] urls={"https://api.kilo.ai/api/gateway","https://api.groq.com/openai/v1",
-                "https://generativelanguage.googleapis.com/v1beta/openai",
-                "https://openrouter.ai/api/v1","https://example.com/v1"};
-            String[] models={"kilo-auto/free","llama-3.3-70b-versatile","gemini-2.5-flash",
-                "meta-llama/llama-3.3-70b-instruct:free","your-model"};
-            if(index<0 || index>=names.length)index=0;
-            String name=names[index];
-            String url=prefs.getString("url_"+name,urls[index]);
-            String model=prefs.getString("model_"+name,models[index]);
-            String key=prefs.getString("key_"+name,"");
-            if(url==null || !(url.startsWith("https://") || url.startsWith("http://127.0.0.1:")))
-                throw new IOException("عنوان API غير آمن");
-            if(model==null || model.isEmpty() || model.length()>256)
-                throw new IOException("معرّف النموذج غير صحيح");
+            String[] families={"freellmpool","gpt4free","free-llm-gateway","free-llm-api"};
+            if(index<0 || index>=families.length)index=0;
             File config=new File(LinuxEnvironment.rootfs(this),"root/.m4-agent");
             if(!config.exists() && !config.mkdirs())throw new IOException("تعذّر تجهيز إعدادات الوكيل");
             File destination=new File(config,"provider.env");
-            String body="export TERM_AGENT_API_BASE="+shellQuote(url)+"\n"+
-                        "export TERM_AGENT_MODEL="+shellQuote(model)+"\n"+
-                        "export TERM_AGENT_API_KEY="+shellQuote(key==null?"":key)+"\n";
+            String body="export M4_GATEWAY_FAMILY="+shellQuote(families[index])+"\n";
             java.nio.file.Files.write(destination.toPath(),body.getBytes(StandardCharsets.UTF_8));
             destination.setReadable(false,false);
             destination.setWritable(false,false);
@@ -645,7 +630,7 @@ public final class MainActivity extends Activity {
         if(active==null||!active.linux){
             notice("افتح جلسة Alpine Linux أولاً لاستخدام الوكيل.");return;
         }
-        String[] entries={"فحص بيئة الوكيل","الأدوات المثبتة والإضافات","حالة المهمة الحالية","تعليمات البدء"};
+        String[] entries={"فحص بيئة الوكيل","أدوات M4 المدمجة","حالة المهمة الحالية","تعليمات البدء"};
         new AlertDialog.Builder(this).setTitle("🤖 Term Agent — بيئة البرمجة")
             .setItems(entries,(dialog,index)->{
                 switch(index){
@@ -655,9 +640,9 @@ public final class MainActivity extends Activity {
                     case 3:
                         notice("لبدء مشروع:\nmkdir -p /root/projects/demo\ncd /root/projects/demo\nterm-agent init"+
                         "\nterm-agent check-add 'python3 -V'"+
-                        "\nثم اضبط TERM_AGENT_API_BASE وTERM_AGENT_MODEL"+
+                        "\nاختر مزوّد M4 من واجهة المحادثة"+
                         "\nوشغّل: term-agent run 'هدفك' --allow-exec"+
-                        "\nيمكنك إضافة Pi وRalph عبر term-agent-addons help");
+                        "\nلا يحتاج الوكيل إلى إضافات أو Termux");
                         break;
                 }
             }).setNegativeButton("إغلاق",null).show();
