@@ -8,7 +8,6 @@ import android.content.ServiceConnection
 import android.os.IBinder
 import io.musab.arabicterminal.ArabicCommandRouter
 import io.musab.arabicterminal.LinuxEnvironment
-import io.musab.arabicterminal.MainActivity
 import io.musab.arabicterminal.PhoneController
 import io.musab.arabicterminal.TerminalService
 import kotlinx.coroutines.CompletableDeferred
@@ -112,13 +111,8 @@ class M4NativeTools(private val app: Application) {
                 n.contains("connect") || n.contains("login"))
     }
 
-    private fun githubConnect(): String {
-        app.startActivity(Intent(app, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            .putExtra(MainActivity.EXTRA_GITHUB_LOGIN,true))
-        return "فُتحت الطرفية العربية لإجراء تسجيل دخول GitHub الرسمي عبر gh auth login. " +
-               "اتبع تعليمات رمز الجهاز؛ لا تضع رمز وصولك في المحادثة."
-    }
+    private fun githubConnect(): String =
+        "اربط GitHub من لوحة الطرفية التفاعلية داخل المحادثة باستخدام gh auth login؛ لا تشارك الرموز في الرسائل."
 
     private suspend fun executeTerminal(command: String, seconds: Int,
                                         onOutput: (String) -> Unit = {}): String {
