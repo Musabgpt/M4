@@ -1,3 +1,8 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
 // A certificate fingerprint is public information; it is NOT a signing key.
 // Release builds require the original NewAl-Cloud key injected by CI.
 def releaseFile = System.getenv('MUSABAI_RELEASE_STORE_FILE')
@@ -9,11 +14,7 @@ def hasReleaseSigning = signingFields.every { it != null && !it.isEmpty() }
 if (signingFields.any { it != null && !it.isEmpty() } && !hasReleaseSigning) {
     throw new GradleException('Incomplete persistent NewAl release signing credentials')
 }
-plugins {
-    id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
-    id 'org.jetbrains.kotlin.plugin.compose'
-}
+
 android {
     namespace 'io.musab.arabicterminal'
     compileSdk 36
@@ -25,7 +26,7 @@ android {
         targetSdk 35
         // NewAl-Cloud last compatible release build used versionCode 363.
         // GitHub M4_BUILD_NUMBER monotonically advances across releases.
-        versionCode ((System.getenv('M4_BUILD_NUMBER') ?: '10000') as Integer)
+        versionCode (10000 + ((System.getenv('M4_BUILD_NUMBER') ?: '0') as Integer))
         versionName '2.0.0'
         externalNativeBuild { cmake { cFlags '-std=c11' } }
     }
