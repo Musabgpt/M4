@@ -32,11 +32,20 @@ public final class LinuxEnvironment {
             new File(libs,"libproot-loader.so").isFile();
     }
     public static void install(Context c)throws Exception {
-        if(installed(c) && new File(rootfs(c),"usr/bin/python3").exists() &&
+        File runtimeMarker=new File(rootfs(c),".arabicterminal-installed");
+        boolean currentRuntime=false;
+        try{
+            currentRuntime=new String(Files.readAllBytes(runtimeMarker.toPath()),
+                java.nio.charset.StandardCharsets.UTF_8).contains("agent-runtime-v2");
+        }catch(IOException ignored){}
+        if(installed(c) && currentRuntime &&
+                new File(rootfs(c),"usr/bin/python3").exists() &&
                 new File(rootfs(c),"usr/bin/node").exists() &&
                 new File(rootfs(c),"bin/bash").exists() &&
                 new File(rootfs(c),"usr/local/bin/apk-v2").exists() &&
                 new File(rootfs(c),"opt/term-agent/agent.py").isFile() &&
+                new File(rootfs(c),"opt/term-agent/system_prompt.md").isFile() &&
+                new File(rootfs(c),"opt/term-agent/provider_routes.py").isFile() &&
                 new File(rootfs(c),"usr/local/bin/term-agent").isFile()){
             refreshDns(c);
             return;
@@ -88,7 +97,7 @@ public final class LinuxEnvironment {
                 throw new IOException("تعذر تفعيل ملفات لينكس");
             }
             Files.write(new File(root,".arabicterminal-installed").toPath(),
-                "Alpine 3.24.2 + agent-runtime-v1\n".getBytes(
+                "Alpine 3.24.2 + agent-runtime-v2\n".getBytes(
                     java.nio.charset.StandardCharsets.UTF_8));
             refreshDns(c);
             if(backup.exists())remove(backup);
