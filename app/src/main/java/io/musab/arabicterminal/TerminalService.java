@@ -153,7 +153,10 @@ public final class TerminalService extends Service {
             throw new IOException("Invalid terminal command");
         int seconds=Math.max(2,Math.min(60,timeoutSeconds));
         synchronized(toolLock){
-            LinuxEnvironment.install(this);
+            try { LinuxEnvironment.install(this); }
+            catch(Exception error) {
+                throw new IOException("Unable to prepare verified Alpine runtime",error);
+            }
             if(agentSession==null || agentSession.finished || !sessions.contains(agentSession)){
                 Session previous=selected;
                 agentSession=create(false,true,24,90);
