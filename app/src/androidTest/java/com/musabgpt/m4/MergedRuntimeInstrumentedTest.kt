@@ -36,6 +36,52 @@ class MergedRuntimeInstrumentedTest {
         android.util.Log.i("M4QAReceipt", name + " " + text.take(3500))
     }
 
+    @Test fun firstUseSetupAvailableWithoutExternalPairingWizard() {
+        activity.onNodeWithTag("chat-plus").performClick()
+        activity.onNodeWithText("Termux — أوامر حقيقية").assertExists()
+        activity.onNodeWithTag("chat-terminal-toggle").performClick()
+        activity.onNodeWithText("تجهيز وكيل NewAl تلقائياً").assertExists()
+        activity.onNodeWithText("Termux — محرك M4").assertExists()
+    }
+
+    @Test fun doctorUsesRealNewlinesInsteadOfEscapedJson() {
+        lateinit var vm: ChatViewModel
+        activity.runOnIdle {
+            vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
+            vm.newChat()
+            vm.send("/doctor")
+        }
+        val text = vm.conversations.value.first { it.id == vm.currentId.value }.messages.last().content
+        assertTrue("Real line breaks expected: " + text, text.contains("\nصلاحية RUN_COMMAND:"))
+        assertFalse("Escaped JSON delimiters must be invisible", text.contains("\\\\n"))
+    }
+
+    @Test fun legacyTermuxDebugReceiptsAreNotChatFiles() {
+        val id = UUID.randomUUID().toString()
+        val report = ArtifactRepository.saveReport(context, owner, "termux-" + id + ".md",
+            "transport diagnostic, not a user file")
+        val keep = ArtifactRepository.saveText(context, owner, "my-project.md", "user project")
+        try {
+            val visible = ArtifactRepository.list(context, owner)
+            assertFalse("Internal Termux receipt leaked into conversation",
+                visible.any { it.id == report.id })
+            assertTrue("User files must remain visible",
+                visible.any { it.id == keep.id })
+        } finally {
+            File(context.filesDir, "artifacts/" + report.id).deleteRecursively()
+            File(context.filesDir, "artifacts/" + keep.id).deleteRecursively()
+        }
+    }
+
+    @Test fun whatsappCompositeSearchMustNotRouteToModel() {
+        val recognized = com.musabgpt.m4.phone.LocalAppSearch.parse(
+            "افتح واتساب وابحث عن مسلسل باب الحارة"
+        )
+        assertNotNull("Explicit WhatsApp search must be handled locally", recognized)
+        assertEquals("com.whatsapp", recognized!!.app)
+        assertEquals("مسلسل باب الحارة", recognized.query)
+    }
+
     @Test fun githubRepositoryBrowserIsActuallyReachableFromChatHeader() {
         activity.onNodeWithTag("open-github").performClick()
         activity.onNodeWithText("GitHub • M4 / NewAl").assertExists()
