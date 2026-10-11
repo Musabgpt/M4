@@ -15,14 +15,16 @@ audited at remote `56de7a901fc22a1b2e6d374800d73bb6b131bf2c`; changes are in
   semantic loop detection, exclusive project ownership and interrupt recovery.
 - Python compile and shell syntax checks pass. Existing signing pin, release
   signing script and SafeRootfsExtractor bytes are preserved.
-- First integration commit `3501d905dfa0382903e812a8afa64f465b657ce1` passed
-  all three workflows: agent run 38125249913, Kotlin/Java run 38125249814,
-  Android SDK/NDK/rootfs/APK run 38125249822. The last produced the real
-  `ArabicTerminal-debug-APK` artifact (109,777,361 ZIP bytes), artifact ID
-  11696649531. Final refinement results are linked on the PR; an earlier
-  build does not validate later source edits.
+- Implementation commit `76e92f3d48bab2ea1e32da6a940ab397052202de` passed
+  agent run 38127226774 and Android SDK/NDK/rootfs/APK run 38127226764.
+  The latter runs all six JVM tests, including the complete bundled Alpine
+  extraction test, and produced the real `ArabicTerminal-debug-APK` artifact
+  (109,787,908 ZIP bytes), artifact ID 11697633458. Final CI results for later
+  workflow/documentation changes are linked on the PR.
 - Four additional JVM tests cover URL boundaries and DST/missed schedule
-  windows; the final CI runs `:app:testDebugUnitTest` as well as compilation.
+  windows. The lightweight Kotlin/Java job runs these and the standalone
+  hard-link regression without downloading Alpine. The APK job retains the
+  complete suite after bundling Alpine; no extraction assertion is removed.
 
 No physical device, emulator, authenticated ADB, optional Termux, Accessibility,
 OAuth application configuration or private signing key was supplied. CI APK
@@ -39,14 +41,14 @@ construction is evidence of construction, not evidence of device behavior.
 | UTF-8 / ZIP artifact generation and persistence | implemented_verified | Actual files, syntax, ZIP CRC and SHA-256 tests |
 | Arabic PDF, native bridge, card preview/save/share | implemented_unverified | Android implementation compiled; device rendering/export required |
 | WorkManager / SQLite task execution and approval | implemented_unverified | Android compilation; repeat, restart, stop and lock acceptance required |
-| Daily local-time calculation | implemented_unverified | JVM test source added; see final CI result |
+| Daily local-time calculation | implemented_verified | JVM DST and missed-window tests pass; device scheduling remains unverified |
 | File editor/diff and owned-WebView DOM | implemented_unverified | Compiled workbench; device interaction required |
 | Existing manual phone controls | partial | Preserved; model bridge and phone test lab missing |
 | Termux optional backend | missing | No permission/verified installed app/result adapter |
 | Skills, MCP, subagents, hooks, tool factory | missing | No executable implementation in this delivery |
 | Product GitHub device flow / credential vault / self-CI | missing | The host's GitHub connector does not register these inside M4 |
 | Full permission dialog / approval steering / rewind UI | partial | Plan/execute switch, task-scope approval and file review work; full gate remains |
-| Signing and rootfs protections | implemented_verified | Existing policy tests and first Android CI; release key still required |
+| Signing and rootfs protections | implemented_verified | Existing policy tests and Android CI; release key still required |
 
 ## Full user acceptance cases
 
