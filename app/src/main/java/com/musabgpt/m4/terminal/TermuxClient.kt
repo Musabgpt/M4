@@ -77,7 +77,12 @@ object TermuxClient {
             .putExtra("com.termux.RUN_COMMAND_ARGUMENTS", Array(arguments.length()) { arguments.getString(it) })
             .putExtra("com.termux.RUN_COMMAND_WORKDIR", cwd).putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
             .putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", pending)
-        try { context.startService(command) }
+        // Android 8+ background limits: NewAl used startForegroundService for
+        // the official Termux RUN_COMMAND service, not startService.
+        try {
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(command)
+            else context.startService(command)
+        }
         catch (e: Exception) { pending.cancel(); return JSONObject().put("status", "blocked").put("error", "Termux لم يقبل الأمر: ${e.message}") }
         val end = System.nanoTime() + args.optInt("timeout", 60).coerceIn(1, 120) * 1_000_000_000L
         val response = File(folder, "result.json")
