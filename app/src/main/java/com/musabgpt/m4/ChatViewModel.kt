@@ -318,8 +318,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _streaming.value = true
         job = viewModelScope.launch {
             try {
-                val target = if (attached.isEmpty()) PhoneIntent.openTarget(clean) else null
-                val result = if (target != null && _permissionMode.value != "plan_only") {
+                val youtube = if (attached.isEmpty()) com.musabgpt.m4.phone.YouTubeActions.parse(clean) else null
+                val target = if (youtube == null && attached.isEmpty()) PhoneIntent.openTarget(clean) else null
+                val result = if (youtube != null && _permissionMode.value != "plan_only") {
+                    val launched = com.musabgpt.m4.phone.YouTubeActions.search(getApplication(), youtube)
+                    var message = launched.optString("message", launched.optString("error"))
+                    if (youtube.play && launched.optString("status") == "dispatched") {
+                        var playback = JSONObject().put("status", "not_verified")
+                        repeat(4) {
+                            if (playback.optString("status") !in setOf("dispatched", "permission_required")) {
+                                kotlinx.coroutines.delay(850)
+                                playback = com.musabgpt.m4.phone.YouTubeActions.tryPlayFirst()
+                            }
+                        }
+                        message += "\\n" + playback.optString("message", playback.optString("error"))
+                    }
+                    JSONObject().put("content", message).put("status", launched.optString("status"))
+                } else if (target != null && _permissionMode.value != "plan_only") {
                     val args = JSONObject().put("app", target)
                     withContext(Dispatchers.IO) { ChatEventStream.append(getApplication(), convId, turnId, "tool_started", JSONObject().put("tool", "PhoneOpenApp").put("args", args)) }
                     val allowed = _permissionMode.value != "ask_always" || withContext(Dispatchers.IO) { CapabilityBroker.request(convId, "فتح تطبيق", args) }
