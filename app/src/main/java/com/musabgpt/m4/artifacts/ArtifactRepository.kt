@@ -50,7 +50,7 @@ object ArtifactRepository {
                 if (obj.optBoolean("archived")) return@mapNotNull null
                 val row = decode(obj)
                 if (row.owner != owner || row.id != directory.name || !validName(row.name) ||
-                    row.name.matches(Regex("termux-[a-f0-9-]{36}\.md"))) null else row
+                    row.name.matches(Regex("termux-[a-f0-9-]{36}\\.md"))) null else row
             } catch (_: Exception) { null }
         }.sortedBy { it.createdAt }
 
