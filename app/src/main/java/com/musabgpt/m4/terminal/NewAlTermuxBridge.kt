@@ -132,6 +132,10 @@ if phase=='setup':
     print(json.dumps({'status':'succeeded',
         'content':'تم تجهيز خادم NewAl داخل Termux. أرسل طلبك الآن؛ إذا لم يكن هناك نموذج متاح، ستحتاج لاختيار نموذج أو مزود.'},ensure_ascii=False))
     sys.exit(0)
+# NewAl runs in an explicit project workspace; do not use the whole
+# Termux home containing private pairing keys as the agent's project root.
+workspace=os.path.join(home,'projects','M4')
+os.makedirs(workspace,mode=0o700,exist_ok=True)
 sessions_path=os.path.join(home,'.m4-newal-sessions.json')
 try:
     sessions=json.load(open(sessions_path,encoding='utf-8'))
@@ -139,7 +143,10 @@ try:
 except (OSError,ValueError): sessions={}
 sid=sessions.get(owner)
 if sid:
-    try: api('/api/sessions/'+sid)
+    try:
+        old_info=api('/api/sessions/'+sid)
+        old_root=(old_info.get('meta') or {}).get('root')
+        if old_root and os.path.realpath(old_root)!=os.path.realpath(workspace): sid=None
     except Exception: sid=None
 safe_modes={'plan_only':'read-only','ask_always':'ask',
             'accept_edits':'auto-edit','auto_project':'auto-edit'}
@@ -147,7 +154,7 @@ if mode not in safe_modes: raise ValueError('Unknown M4 permission mode')
 desired=safe_modes[mode]
 if not sid:
     if phase=='resume': raise RuntimeError('NewAl session was lost before approval')
-    created=api('/api/sessions',{'root':home,'mode':desired,'warm':False})
+    created=api('/api/sessions',{'root':workspace,'mode':desired,'warm':False})
     sid=created['id']
     sessions[owner]=sid
     temporary=sessions_path+'.tmp'
@@ -197,7 +204,38 @@ while time.monotonic()<deadline:
         if answer is not None: break
     time.sleep(0.35)
 if answer is None: raise TimeoutError('NewAl Code did not return a finished turn')
-print(json.dumps({'status':'succeeded','content':answer,'backend':'termux-newal'},ensure_ascii=False))
+# Publish only verified current-turn project files, never the private
+# Termux home, credentials, logs, or a stale prior-turn artifact.
+published=[]
+try:
+    import re
+    sys.path.insert(0,os.path.join(state_dir,'app'))
+    from newal_code.session import Session
+    turn=int((current.get('meta') or {}).get('turn') or 0)
+    session=Session.load(sid)
+    candidates=session.changes(turn)
+    for file in candidates:
+        if len(published)>=2: break
+        if file.get('status') not in ('added','modified'): continue
+        rel=file.get('path','')
+        absolute=os.path.realpath(os.path.join(workspace,rel))
+        if not absolute.startswith(os.path.realpath(workspace)+os.sep): continue
+        name=os.path.basename(absolute)
+        if not re.fullmatch(r'[\\w. -]{1,120}',name,re.UNICODE) or name.startswith('.'): continue
+        if re.search(r'secret|token|passwd|credential|api.?key|\\.env',name,re.I): continue
+        if os.path.splitext(name)[1].lower() not in ('.html','.md','.txt','.py','.sh','.json'): continue
+        if not os.path.isfile(absolute) or os.path.islink(absolute): continue
+        if os.path.getsize(absolute) not in range(1,14001): continue
+        with open(absolute,'rb') as input_file: data=input_file.read(14001)
+        if len(data)>14000: continue
+        try: data.decode('utf-8','strict')
+        except UnicodeDecodeError: continue
+        published.append({'name':name,'content_b64':base64.b64encode(data).decode('ascii')})
+except Exception:
+    # The model answer is real even if artifact transfer fails.
+    pass
+print(json.dumps({'status':'succeeded','content':answer,
+                  'backend':'termux-newal','files':published},ensure_ascii=False))
 """.trimIndent()
 
     /** Set up a real NewAl agent in Termux without sending an AI prompt. */
