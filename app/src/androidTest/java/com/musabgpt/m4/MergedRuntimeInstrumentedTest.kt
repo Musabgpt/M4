@@ -53,7 +53,7 @@ class MergedRuntimeInstrumentedTest {
         }
         val text = vm.conversations.value.first { it.id == vm.currentId.value }.messages.last().content
         assertTrue("Real line breaks expected: " + text, text.contains("\nصلاحية RUN_COMMAND:"))
-        assertFalse("Escaped JSON delimiters must be invisible", text.contains("\\\\n"))
+        assertFalse("Escaped JSON delimiters must be invisible", text.contains("\\n"))
     }
 
     @Test fun legacyTermuxDebugReceiptsAreNotChatFiles() {
