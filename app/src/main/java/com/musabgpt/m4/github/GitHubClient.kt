@@ -39,6 +39,24 @@ class GitHubClient(private val context: Context) {
     private fun repo(args: JSONObject): String = args.getString("repository").also { require(it.matches(Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"))) }
     private fun branch(value: String): String = value.also { require(it.matches(Regex("(?:m4|newal|codex)/[A-Za-z0-9][A-Za-z0-9._/-]{0,100}")) && !it.contains("..") && !it.endsWith('/')) }
 
+    /**
+     * NewAl-style token sign-in: verify the GitHub account BEFORE saving
+     * credentials; never send the token to the LLM or persist it in plaintext.
+     */
+    fun connectToken(tokenInput: String): JSONObject {
+        val token = tokenInput.trim()
+        require(token.length in 20..2000 && token.none { it.isWhitespace() }) {
+            "GitHub token must be a non-empty personal access token"
+        }
+        val account = exchange("https://api.github.com/user", "GET", token = token) as JSONObject
+        val login = account.getString("login")
+        require(login.matches(Regex("[A-Za-z0-9-]{1,39}")))
+        vault.save(token)
+        settings.edit().putString("login", login)
+            .putLong("last_validated", System.currentTimeMillis()).apply()
+        return status().put("credential_status", "verified").put("status", "verified")
+    }
+
     fun beginDeviceFlow(): JSONObject {
         val client = settings.getString("client_id", "").orEmpty()
         require(client.isNotBlank()) { "يلزم client_id لتطبيق OAuth الخاص بـ M4؛ اتصال Codex لا ينقل اعتماده إلى الهاتف" }
