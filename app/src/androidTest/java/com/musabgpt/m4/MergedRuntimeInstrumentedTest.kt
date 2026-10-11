@@ -57,7 +57,7 @@ class MergedRuntimeInstrumentedTest {
         // Only a shell that really executed printf can produce the full token.
         val suffix = UUID.randomUUID().toString().take(8)
         val expected = "M4_EXECUTED_" + suffix
-        vm.terminal.execute("printf '%s%s\n' 'M4_EXECUTED_' '" + suffix + "'")
+        vm.terminal.execute("printf '%s%s' 'M4_EXECUTED_' '" + suffix + "'")
         try {
             activity.waitUntil(45000) {
                 vm.terminal.state.value.frame?.text?.contains(expected) == true
