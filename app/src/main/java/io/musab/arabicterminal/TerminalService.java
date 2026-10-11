@@ -76,44 +76,11 @@ public final class TerminalService extends Service {
             manager.createNotificationChannel(channel);
         }
     }
+    // Retired as an Android service: M4 uses Termux RUN_COMMAND exclusively.
+    // Kept only as transitional Java source while callsites are migrated.
     @Override public int onStartCommand(Intent intent,int flags,int startId){
-        if(intent!=null && ACTION_STOP.equals(intent.getAction())){
-            stopAll();
-            stopForeground(STOP_FOREGROUND_REMOVE);
-            stopSelf();
-            return START_NOT_STICKY;
-        }
-        startNotification();
-        return START_STICKY;
-    }
-    private void startNotification(){
-        Intent open=new Intent(this,com.musabgpt.m4.M4ChatActivity.class);
-        open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        PendingIntent go=PendingIntent.getActivity(this,0,open,
-            PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        Intent stop=new Intent(this,TerminalService.class);
-        stop.setAction(ACTION_STOP);
-        PendingIntent exit=PendingIntent.getService(this,1,stop,
-            PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        String label=sessions.isEmpty()?"جاري تجهيز الطرفية":
-            sessions.size()+" جلسة نشطة — اضغط للعودة";
-        Notification.Builder builder=Build.VERSION.SDK_INT>=26?
-            new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
-        Notification notification=builder
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("الطرفية العربية • Alpine Linux")
-            .setContentText(label)
-            .setContentIntent(go)
-            .setOngoing(true)
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .setVisibility(Notification.VISIBILITY_PRIVATE)
-            .addAction(new Notification.Action.Builder(
-                android.R.drawable.ic_menu_close_clear_cancel,"إنهاء الجلسات",exit).build())
-            .build();
-        if(Build.VERSION.SDK_INT>=34)
-            startForeground(NOTIFICATION,notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-        else startForeground(NOTIFICATION,notification);
+        stopSelf();
+        return START_NOT_STICKY;
     }
     @Override public IBinder onBind(Intent intent){return binder;}
     public List<Session> sessions(){return sessions;}
