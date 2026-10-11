@@ -24,6 +24,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 
 @RunWith(AndroidJUnit4::class)
 class MergedRuntimeInstrumentedTest {
@@ -96,8 +97,9 @@ class MergedRuntimeInstrumentedTest {
             context.packageManager.getServiceInfo(component, 0)
         }.isSuccess
         assertFalse("Retired native PTY service must not be in the manifest", registered)
-        assertNull("Accessibility service must not show an Arabic terminal overlay",
-            io.musab.arabicterminal.UiControlService.current()?.let { "overlay invisible by design" })
+        val oldActivity = android.content.ComponentName(context, io.musab.arabicterminal.MainActivity::class.java)
+        assertFalse("Retired Arabic terminal activity must not be registered",
+            runCatching { context.packageManager.getActivityInfo(oldActivity, 0) }.isSuccess)
     }
 
     @Test fun missingTermuxIsReportedWithoutFallingBackToModelGateways() {
