@@ -57,6 +57,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             _pendingAttachments.value = (_pendingAttachments.value + artifact).distinctBy { it.id }.takeLast(8)
         } catch (e: Exception) { edit(_currentId.value) { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "تعذر استيراد المرفق: ${e.message}")) }; saveHistory() }
     } }
+    fun attachCamera(bitmap: android.graphics.Bitmap) {
+        viewModelScope.launch {
+            try {
+                val owner = _currentId.value
+                val item = withContext(Dispatchers.IO) {
+                    val stream = java.io.ByteArrayOutputStream()
+                    require(bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, stream)) { "تعذر التقاط الصورة" }
+                    com.musabgpt.m4.artifacts.ArtifactRepository.saveBinary(
+                        getApplication(), owner, "camera-"+System.currentTimeMillis()+".jpg", "image/jpeg", stream.toByteArray()
+                    )
+                }
+                _pendingAttachments.value = (_pendingAttachments.value + item).distinctBy { it.id }.takeLast(8)
+            } catch (e: Exception) {
+                edit(_currentId.value) { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "تعذر إرفاق الصورة: "+e.message)) }
+                saveHistory()
+            }
+        }
+    }
     fun removeAttachment(id: String) { _pendingAttachments.value = _pendingAttachments.value.filter { it.id != id } }
     fun saveCode(language: String, code: String) { viewModelScope.launch {
         try { withContext(Dispatchers.IO) {
