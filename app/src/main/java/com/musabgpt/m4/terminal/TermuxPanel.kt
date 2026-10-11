@@ -89,7 +89,8 @@ fun TermuxPanel(owner: String) {
             modifier = Modifier.fillMaxWidth(),
             maxLines = 4
         )
-        Button(enabled = !busy && command.isNotBlank(), onClick = {
+        Button(enabled = !busy && command.isNotBlank() && meta.optBoolean("installed") &&
+            meta.optBoolean("permission_granted"), onClick = {
             val queued = command
             busy = true
             result = "جارٍ تنفيذ الأمر داخل Termux..."
