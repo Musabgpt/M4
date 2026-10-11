@@ -168,12 +168,17 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
     suspend fun chat(request: JSONObject, family: String, mode: String, event: (RuntimeEvent) -> Unit): JSONObject {
         require(family in setOf("freellmpool", "gpt4free", "free-llm-gateway", "free-llm-api"))
         require(mode in setOf("auto_project", "plan_only", "ask_always", "accept_edits"))
-        android.util.Log.i("M4Runtime", "Chat: requesting execution backend")
-        open()
-        withTimeout(120000) { initialized.await() }
-        android.util.Log.i("M4Runtime", "Chat: execution backend ready")
-        val current = service ?: error("لم تتصل خدمة الطرفية")
-        require(LinuxEnvironment.installed(context)) { state.value.status }
+        android.util.Log.i("M4Runtime", "Chat: preparing packaged runtime independently of terminal service")
+        withTimeout(120000) {
+            withContext(Dispatchers.IO) {
+                // No PTY or terminal binding is needed for AI chat. All runtime
+                // installation/checkout operations are synchronized with the
+                // interactive terminal's prepare() implementation.
+                LinuxEnvironment.install(context.applicationContext)
+                io.musab.arabicterminal.ProjectBootstrap.ensure(LinuxEnvironment.rootfs(context))
+            }
+        }
+        android.util.Log.i("M4Runtime", "Chat: packaged runtime ready")
         val owner = request.getString("owner_session_id")
         val turn = request.getString("turn_id")
         require(owner.matches(Regex("[A-Za-z0-9-]{1,80}")) && turn.matches(Regex("[A-Za-z0-9-]{1,80}")))
