@@ -31,6 +31,8 @@ jobs:
           python3 -m unittest discover -s agent_tests -v
           python3 -m py_compile agent/agent.py agent/provider_routes.py agent/newal/continuity.py agent/newal/task_state.py
           bash -n agent/term-agent.sh agent/term-agent-watch.sh agent/m4-agent-start.sh
+      - name: Verify chat startup failure receipts
+        run: bash tests/test_agent_launch_receipt.sh
       - name: تضمين Alpine Linux وPRoot بالتحقق من البصمات
         run: |
           sudo apt-get update -qq

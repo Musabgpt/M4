@@ -20,6 +20,8 @@ jobs:
         run: |
           python3 -m unittest discover -s agent_tests -v
           python3 -m unittest discover -s tests -p 'test_signing_policy.py' -v
+      - name: Verify chat startup failure receipts
+        run: bash tests/test_agent_launch_receipt.sh
       - name: Python compile and script validation
         run: |
           python3 -m py_compile agent/agent.py agent/provider_routes.py
