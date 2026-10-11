@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -21,6 +22,7 @@ import kotlinx.coroutines.withContext
     var status by remember { mutableStateOf(client.status().toString()) }
     var clientId by remember { mutableStateOf(context.getSharedPreferences("m4_github", 0).getString("client_id", "").orEmpty()) }
     var code by remember { mutableStateOf("") }
+    var tokenText by remember { mutableStateOf("") }
     var repository by remember { mutableStateOf("Musabgpt/M4") }
     var repoOwner by remember { mutableStateOf("Musabgpt") }
     var availableRepositories by remember { mutableStateOf(emptyList<String>()) }
@@ -31,6 +33,23 @@ import kotlinx.coroutines.withContext
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("GitHub • M4 / NewAl", style = MaterialTheme.typography.titleLarge)
         Text(status, style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(tokenText, { tokenText = it }, label = { Text("GitHub access token") },
+            singleLine = true, visualTransformation = PasswordVisualTransformation())
+        Button(enabled = !busy && tokenText.isNotBlank(), onClick = {
+            busy = true
+            val supplied = tokenText
+            tokenText = ""
+            scope.launch {
+                try {
+                    status = withContext(Dispatchers.IO) { client.connectToken(supplied).toString() }
+                } catch (e: Exception) {
+                    status = e.message ?: "تعذر ربط GitHub"
+                } finally {
+                    busy = false
+                }
+            }
+        }) { Text("ربط GitHub مباشرة") }
+
         if (!client.status().optBoolean("client_configured")) {
             Text("يحتاج المطور client_id لتطبيق OAuth المخصص لـ M4. حساب Codex المتصل هنا لا يرسل اعتماده إلى الهاتف.")
             OutlinedTextField(clientId, { clientId = it }, label = { Text("OAuth client_id (إعداد المطور)") })
