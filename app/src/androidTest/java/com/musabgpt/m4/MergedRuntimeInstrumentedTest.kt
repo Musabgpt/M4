@@ -36,6 +36,14 @@ class MergedRuntimeInstrumentedTest {
         android.util.Log.i("M4QAReceipt", name + " " + text.take(3500))
     }
 
+    @Test fun githubRepositoryBrowserIsActuallyReachableFromChatHeader() {
+        activity.onNodeWithTag("open-github").performClick()
+        activity.onNodeWithText("GitHub • M4 / NewAl").assertExists()
+        activity.onNodeWithText("عرض المستودعات").assertExists()
+        evidence("github-panel-navigation.json", JSONObject()
+            .put("opened", true).put("repository_browsing_ui", true).toString(2))
+    }
+
     @Test fun chatActionSheetExposesMediaAndTermuxWithoutArabicPty() {
         activity.onNodeWithTag("open-github").assertExists()
         activity.onNodeWithTag("chat-plus").performClick()
