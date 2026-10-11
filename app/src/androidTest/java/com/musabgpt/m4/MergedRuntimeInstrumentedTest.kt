@@ -72,8 +72,28 @@ class MergedRuntimeInstrumentedTest {
                 .put("exception", failure.javaClass.simpleName).toString(2))
             throw failure
         }
+        // Verify that the packaged development programs execute, not that the
+        // terminal merely displays their command lines. Split marker literals
+        // inside each command so an input echo cannot satisfy the assertion.
+        val pythonOutput = "M4_PY_" + suffix + "_OK"
+        vm.terminal.execute("python3 -c \"print('M4_' + 'PY_' + '" + suffix + "' + '_OK')\"")
+        activity.waitUntil(45000) {
+            vm.terminal.state.value.frame?.text?.contains(pythonOutput) == true
+        }
+        val nodeOutput = "M4_NODE_" + suffix + "_OK"
+        vm.terminal.execute("node -e \"process.stdout.write('M4_' + 'NODE_' + '" + suffix + "' + '_OK')\"")
+        activity.waitUntil(45000) {
+            vm.terminal.state.value.frame?.text?.contains(nodeOutput) == true
+        }
+        vm.terminal.execute("git --version")
+        activity.waitUntil(45000) {
+            vm.terminal.state.value.frame?.text?.contains("git version ") == true
+        }
         evidence("pty-command.json", JSONObject()
             .put("verified_output", expected)
+            .put("verified_python", pythonOutput)
+            .put("verified_node", nodeOutput)
+            .put("verified_git", true)
             .put("terminal", vm.terminal.state.value.status).toString(2))
     }
 
@@ -127,6 +147,10 @@ class MergedRuntimeInstrumentedTest {
             assertEquals("مرحباً، المحادثة جاهزة.", reply)
             assertTrue(received.get().contains("مرحبا"))
             assertTrue(File(LinuxEnvironment.rootfs(context), "root/projects/M4/.git").isDirectory)
+            assertTrue(
+                "Chat must work without binding/spawning a terminal PTY",
+                vm.terminal.state.value.sessions.isEmpty()
+            )
         } finally { server.close(); fixture.join(1000) }
     }
 
