@@ -222,8 +222,8 @@ try:
         absolute=os.path.realpath(os.path.join(workspace,rel))
         if not absolute.startswith(os.path.realpath(workspace)+os.sep): continue
         name=os.path.basename(absolute)
-        if not re.fullmatch(r'[\\w. -]{1,120}',name,re.UNICODE) or name.startswith('.'): continue
-        if re.search(r'secret|token|passwd|credential|api.?key|\\.env',name,re.I): continue
+        if not re.fullmatch(r'[\w. -]{1,120}',name,re.UNICODE) or name.startswith('.'): continue
+        if re.search(r'secret|token|passwd|credential|api.?key|\.env',name,re.I): continue
         if os.path.splitext(name)[1].lower() not in ('.html','.md','.txt','.py','.sh','.json'): continue
         if not os.path.isfile(absolute) or os.path.islink(absolute): continue
         if os.path.getsize(absolute) not in range(1,14001): continue
