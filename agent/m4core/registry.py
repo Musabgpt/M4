@@ -2,6 +2,7 @@
 import json
 
 from .fs_tools import ToolError, Workspace
+from .git_tools import git_status, git_diff, git_log, github_pr
 from .permissions import decide
 from .shell import ShellManager
 
@@ -32,6 +33,10 @@ TOOL_SCHEMAS = [
     _fn("KillShell", "Kill a background shell.", {"shell_id": S}, ["shell_id"]),
     _fn("TodoWrite", "Replace the live todo list (one in_progress max).",
         {"todos": {"type": "array"}}, ["todos"]),
+    _fn("GitStatus", "Read repository branch and working-tree status.", {}),
+    _fn("GitDiff", "Read the unstaged or staged diff (bounded).", {"staged": B}),
+    _fn("GitLog", "Read recent commit subjects.", {"limit": I}),
+    _fn("GitHubPR", "Read metadata of a public GitHub pull request.", {"repo": S, "number": I}, ["repo", "number"]),
     _fn("Finish", "Request independent verification of the goal.", {"summary": S}, ["summary"]),
 ]
 TOOL_NAMES = {t["function"]["name"] for t in TOOL_SCHEMAS}
@@ -89,6 +94,14 @@ class ToolRegistry:
             return json.dumps(self.shell.kill(a["shell_id"]), ensure_ascii=False)
         if name == "TodoWrite":
             return ws.todo_write(a["todos"])
+        if name == "GitStatus":
+            return git_status(ws.root)
+        if name == "GitDiff":
+            return git_diff(ws.root, bool(a.get("staged", False)))
+        if name == "GitLog":
+            return git_log(ws.root, a.get("limit", 10))
+        if name == "GitHubPR":
+            return github_pr(a["repo"], a["number"])
         if name == "Finish":
             return "VERIFY"
         raise ToolError("unreachable")
