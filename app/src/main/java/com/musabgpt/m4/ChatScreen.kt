@@ -309,29 +309,7 @@ fun ChatScreen(
                         containerColor = colors.background
                     ),
                     title = {
-                        Box {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { menuOpen = true }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Text(provider.name, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                                Text(" ▾", fontSize = 14.sp, color = colors.onSurfaceVariant)
-                            }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                providers.forEachIndexed { index, p ->
-                                    DropdownMenuItem(
-                                        text = { Text(p.name) },
-                                        onClick = {
-                                            vm.selectProvider(index)
-                                            menuOpen = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
+                        Text("M4 • NewAl / Termux", fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
