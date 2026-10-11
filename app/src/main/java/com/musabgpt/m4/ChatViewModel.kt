@@ -230,6 +230,45 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val clean = text.trim()
         if (clean.isEmpty() || _streaming.value) return
         if (clean in setOf("/terminal", "/phone", "/browser", "/github", "/tasks", "/termux", "/schedule")) { _requestedPanel.value = when(clean) { "/schedule" -> "tasks"; "/termux" -> "tools"; "/phone" -> "tools"; else -> clean.drop(1) }; return }
+        if (clean == "/doctor") {
+            val owner = _currentId.value
+            val answer = UiMessage(role = "assistant", content = "جارٍ فحص الأدوات المحلية فعلياً...")
+            edit(owner) { conversation ->
+                conversation.copy(messages = conversation.messages + UiMessage(role = "user", content = clean) + answer)
+            }
+            saveHistory()
+            _streaming.value = true
+            job = viewModelScope.launch {
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        com.musabgpt.m4.terminal.RuntimeDoctor.inspect(getApplication()) {
+                            job?.isCancelled == true
+                        }
+                    }
+                    edit(owner) { c ->
+                        c.copy(messages = c.messages.map {
+                            if (it.id == answer.id) it.copy(content = result.report) else it
+                        })
+                    }
+                } catch (cancel: CancellationException) {
+                    edit(owner) { c ->
+                        c.copy(messages = c.messages.map {
+                            if (it.id == answer.id) it.copy(content = "تم إيقاف الفحص.") else it
+                        })
+                    }
+                } catch (failure: Exception) {
+                    edit(owner) { c ->
+                        c.copy(messages = c.messages.map {
+                            if (it.id == answer.id) it.copy(content = "فشل الفحص المحلي: " + failure.message) else it
+                        })
+                    }
+                } finally {
+                    _streaming.value = false
+                    saveHistory()
+                }
+            }
+            return
+        }
         if (clean == "/export") { exportChat(); return }
         if (clean == "/compact") {
             edit(_currentId.value) { c -> if (c.messages.size <= 20) c else c.copy(messages = listOf(c.messages.first(), UiMessage(role = "assistant", content = "سياق مضغوط: الهدف الأصلي أعلاه؛ حُذفت ${c.messages.size - 17} رسالة من سياق النموذج. المرفقات وسجل الأدوات باقية.\n" + c.messages.filter { it.role == "user" }.takeLast(4).joinToString("\n") { it.content.take(500) })) + c.messages.takeLast(16)) }
