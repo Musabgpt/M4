@@ -33,7 +33,6 @@ data class Conversation(
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
-    val terminal = EmbeddedAlpineBackend(app, viewModelScope)
     private val prefs = app.getSharedPreferences("m4_chats", 0)
     // Four built-in source families only. No local model import, custom API or keys.
     private val _providers = MutableStateFlow(ProviderCatalog.all)
@@ -92,9 +91,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString("permission_mode", mode).apply()
     }
     private var currentTurn: String? = null
-    fun pause() { currentTurn?.let { terminal.control(it, "pause") } }
-    fun resume() { currentTurn?.let { terminal.control(it, "resume") } }
-    fun steer(text: String) { currentTurn?.let { terminal.control(it, "steer", text) } }
+    // NewAl's session API is remote to Android and cannot be controlled
+    // using obsolete Alpine control files. Do not claim these actions worked.
+    fun pause() {
+        stop()
+        notice("تم إلغاء انتظار الرد في M4. تحقق من مهمة NewAl داخل Termux قبل إعادة التشغيل.")
+    }
+    fun resume() { notice("استئناف NewAl يتطلب فتح الجلسة داخل Termux؛ لم تُستأنف المهمة تلقائياً.") }
+    fun steer(text: String) {
+        notice("التوجيه اللحظي غير متصل بوحدة NewAl بعد؛ أرسل التعليمات في رسالة جديدة بعد انتهاء المهمة.")
+    }
+    private fun notice(text: String) {
+        val id = _currentId.value
+        edit(id) { c -> c.copy(messages = c.messages + UiMessage(role = "assistant", content = text)) }
+        saveHistory()
+    }
     init {
         com.musabgpt.m4.runtime.AgentControl.onStop = { stop() }
         // Legacy configuration has no meaning and may contain old API secrets.
@@ -192,28 +203,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val c = _conversations.value.first { it.id == _currentId.value }
         withContext(Dispatchers.IO) { com.musabgpt.m4.artifacts.ArtifactRepository.saveReport(getApplication(), c.id, "conversation.md", "# ${c.title}\n\n" + c.messages.joinToString("\n\n") { "## ${it.role}\n${it.content}" }) }
     } }
-    fun rewind(turnId: String) { if (_streaming.value || turnId.isBlank()) return
+    fun rewind(turnId: String) {
         val owner = _currentId.value
-        _streaming.value = true
-        job = viewModelScope.launch {
-            try {
-                val request = JSONObject().put("owner_session_id", owner).put("turn_id", UUID.randomUUID().toString()).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "/rewind $turnId")))
-                val result = terminal.chat(request, selected.id, _permissionMode.value) {}
-                val value = runCatching { JSONObject(result.getString("content")) }.getOrNull()
-                if (value?.optString("status") == "rewound") {
-                    val messages = _conversations.value.first { it.id == owner }.messages
-                    val ids = messages.dropWhile { it.turnId != turnId }.filter { it.role == "assistant" }.flatMap { it.attachments }
-                    withContext(Dispatchers.IO) { com.musabgpt.m4.artifacts.ArtifactRepository.archive(getApplication(), owner, ids) }
-                    edit(owner) { c -> c.copy(messages = c.messages.takeWhile { it.turnId != turnId }) }
-                }
-                else edit(owner) { c -> c.copy(messages = c.messages + UiMessage(role = "assistant", content = result.optString("content", "تعذر التراجع"))) }
-            } catch (e: Exception) { edit(owner) { c -> c.copy(messages = c.messages + UiMessage(role = "assistant", content = "تعذر التراجع: ${e.message}")) } }
-            finally { _streaming.value = false; saveHistory() }
+        edit(owner) { conversation ->
+            conversation.copy(messages = conversation.messages + UiMessage(
+                role = "assistant",
+                content = "التراجع عن الملفات المنفذة عبر Termux يحتاج تأكيداً من سجل NewAl داخل Termux. لم أغيّر ملفاتك تلقائياً."
+            ))
         }
+        saveHistory()
     }
     fun stop() {
         CapabilityBroker.cancel()
-        terminal.interruptAgent()
         job?.cancel()
     }
 
@@ -232,49 +233,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (clean in setOf("/terminal", "/phone", "/browser", "/github", "/tasks", "/termux", "/schedule", "/tools", "/files")) {
             _requestedPanel.value = when (clean) {
                 "/schedule" -> "tasks"
-                "/termux" -> "terminal" // Opens M4\'s integrated Linux terminal; /doctor identifies the actual engine.
+                "/termux" -> "termux"
                 "/phone" -> "tools"
                 else -> clean.drop(1)
             }
             return
         }
         if (clean == "/doctor") {
-            val owner = _currentId.value
-            val answer = UiMessage(role = "assistant", content = "جارٍ فحص الأدوات المحلية فعلياً...")
-            edit(owner) { conversation ->
-                conversation.copy(messages = conversation.messages + UiMessage(role = "user", content = clean) + answer)
-            }
+            val status = com.musabgpt.m4.terminal.TermuxClient.status(getApplication())
+            val message = "Termux: " + (if (status.optBoolean("installed")) "مثبت" else "غير مثبت") +
+                "\\nصلاحية RUN_COMMAND: " + (if (status.optBoolean("permission_granted")) "ممنوحة" else "مطلوبة") +
+                "\\nالوكيل: NewAl Code عبر Termux فقط. لا يوجد تشغيل احتياطي عبر الطرفية العربية."
+            edit(_currentId.value) { c -> c.copy(messages = c.messages +
+                UiMessage(role = "user", content = clean) + UiMessage(role = "assistant", content = message)) }
             saveHistory()
-            _streaming.value = true
-            job = viewModelScope.launch {
-                try {
-                    val result = withContext(Dispatchers.IO) {
-                        com.musabgpt.m4.terminal.RuntimeDoctor.inspect(getApplication()) {
-                            job?.isCancelled == true
-                        }
-                    }
-                    edit(owner) { c ->
-                        c.copy(messages = c.messages.map {
-                            if (it.id == answer.id) it.copy(content = result.report) else it
-                        })
-                    }
-                } catch (cancel: CancellationException) {
-                    edit(owner) { c ->
-                        c.copy(messages = c.messages.map {
-                            if (it.id == answer.id) it.copy(content = "تم إيقاف الفحص.") else it
-                        })
-                    }
-                } catch (failure: Exception) {
-                    edit(owner) { c ->
-                        c.copy(messages = c.messages.map {
-                            if (it.id == answer.id) it.copy(content = "فشل الفحص المحلي: " + failure.message) else it
-                        })
-                    }
-                } finally {
-                    _streaming.value = false
-                    saveHistory()
-                }
-            }
             return
         }
         if (clean == "/export") { exportChat(); return }
@@ -292,7 +264,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (clean == "/clear") { newChat(); return }
             if (clean == "/plan") setPlanMode(_permissionMode.value != "plan_only")
             val result = when (clean) {
-                "/help" -> "اكتب طلبك مباشرة؛ المحادثة تستخدم أدوات الهاتف والملفات والطرفية. ! ينفذ أمرًا صريحًا. /plan للتخطيط، /permissions للصلاحيات، /tools للأدوات، /doctor للقدرات، /clear لمحادثة جديدة."
+                "/help" -> "أوامر M4: /termux لتشغيل أدوات Termux، /github للمستودعات، /doctor للتحقق من الربط، /plan و/permissions للصلاحيات."
                 "/permissions" -> "الوضع الحالي: ${_permissionMode.value}\nاختر من قائمة الصلاحيات: auto_project، ask_always، accept_edits، plan_only. كل إجراء حساس للهاتف أو النشر يطلب موافقة محددة."
                 else -> if (_permissionMode.value == "plan_only") "وضع الوكيل: تخطيط للقراءة فقط" else "وضع الوكيل: تنفيذ داخل المشروع"
             }
@@ -318,8 +290,36 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _streaming.value = true
         job = viewModelScope.launch {
             try {
-                val target = if (attached.isEmpty()) PhoneIntent.openTarget(clean) else null
-                val result = if (target != null && _permissionMode.value != "plan_only") {
+                val shell = if (clean.startsWith("!") && clean.length > 1 && attached.isEmpty()) clean.drop(1).trim() else null
+                val youtube = if (shell == null && attached.isEmpty()) com.musabgpt.m4.phone.YouTubeActions.parse(clean) else null
+                val target = if (youtube == null && attached.isEmpty()) PhoneIntent.openTarget(clean) else null
+                val result = if (shell != null && _permissionMode.value != "plan_only") {
+                    val receipt = withContext(Dispatchers.IO) {
+                        com.musabgpt.m4.terminal.TermuxClient.run(getApplication(), JSONObject()
+                            .put("executable", "bash")
+                            .put("arguments", JSONArray(listOf("-lc", shell)))
+                            .put("timeout", 80), convId)
+                    }
+                    JSONObject()
+                        .put("status", receipt.optString("status"))
+                        .put("content", if (receipt.optString("status") == "succeeded")
+                            receipt.optString("stdout") + receipt.optString("stderr")
+                            else receipt.optString("error", receipt.toString(2)))
+                } else if (youtube != null && _permissionMode.value != "plan_only") {
+                    val launched = com.musabgpt.m4.phone.YouTubeActions.search(getApplication(), youtube)
+                    var message = launched.optString("message", launched.optString("error"))
+                    if (youtube.play && launched.optString("status") == "dispatched") {
+                        var playback = JSONObject().put("status", "not_verified")
+                        repeat(4) {
+                            if (playback.optString("status") !in setOf("dispatched", "permission_required")) {
+                                kotlinx.coroutines.delay(850)
+                                playback = com.musabgpt.m4.phone.YouTubeActions.tryPlayFirst()
+                            }
+                        }
+                        message += "\\n" + playback.optString("message", playback.optString("error"))
+                    }
+                    JSONObject().put("content", message).put("status", launched.optString("status"))
+                } else if (target != null && _permissionMode.value != "plan_only") {
                     val args = JSONObject().put("app", target)
                     withContext(Dispatchers.IO) { ChatEventStream.append(getApplication(), convId, turnId, "tool_started", JSONObject().put("tool", "PhoneOpenApp").put("args", args)) }
                     val allowed = _permissionMode.value != "ask_always" || withContext(Dispatchers.IO) { CapabilityBroker.request(convId, "فتح تطبيق", args) }
@@ -330,13 +330,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     val request = JSONObject().put("owner_session_id", convId).put("turn_id", turnId).put("messages", history)
                         .put("attachments", JSONArray(attached.map { it.json().put("path", ".m4/imports/${it.id}/${it.name}") }))
-                    terminal.chat(request, primary.id, _permissionMode.value) { event ->
-                        if (event.kind == "provider_route") {
-                            _activeRoute.value = "المسار الفعلي: " + event.result
-                        } else if (event.kind == "token") edit(convId) { c ->
-                            c.copy(messages = c.messages.map { if (it.id == reply.id) it.copy(content = it.content + event.result) else it })
-                        }
-                    }
+                    _activeRoute.value = "NewAl Code via Termux"
+                    com.musabgpt.m4.terminal.NewAlTermuxBridge.chat(
+                        getApplication(), convId, clean, _permissionMode.value
+                    )
                 }
                 val artifacts = result.optJSONArray("artifacts")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("artifact_id")?.takeIf { id -> id.isNotBlank() } } } ?: emptyList()
                 val status = result.optString("status")
@@ -366,7 +363,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         stop()
-        terminal.detach()
         super.onCleared()
     }
 }

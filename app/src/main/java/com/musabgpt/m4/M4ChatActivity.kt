@@ -20,8 +20,7 @@ import com.musabgpt.m4.runtime.FilesPanel
 import com.musabgpt.m4.runtime.ChatEventStream
 import com.musabgpt.m4.runtime.RuntimeEvent
 import com.musabgpt.m4.scheduler.SchedulerPanel
-import com.musabgpt.m4.terminal.EmbeddedAlpineBackend
-import com.musabgpt.m4.terminal.TerminalPanel
+import com.musabgpt.m4.terminal.TermuxPanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -38,7 +37,6 @@ class M4ChatActivity : ComponentActivity() {
         setContent {
             ChatTheme {
                 val vm: ChatViewModel = viewModel()
-                val terminal = vm.terminal
                 val permissionRequest by com.musabgpt.m4.runtime.HostPermissionRequest.pending.collectAsState()
                 val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> com.musabgpt.m4.runtime.HostPermissionRequest.resolve(granted) }
                 LaunchedEffect(permissionRequest) { permissionRequest?.let { permissionLauncher.launch(it) } }
@@ -59,16 +57,12 @@ class M4ChatActivity : ComponentActivity() {
                 browser.onNavigate = { panel = "browser" }
                 BackHandler(enabled = panel != "chat") { panel = "chat" }
                 var attachments by remember { mutableStateOf(emptyList<ChatArtifact>()) }
-                var events by remember { mutableStateOf(emptyList<RuntimeEvent>()) }
-                var eventLimit by remember(owner) { mutableStateOf(100) }
-                LaunchedEffect(panel) { if (panel == "terminal") terminal.open() }
                 LaunchedEffect(owner) {
                     while (true) {
                         attachments = withContext(Dispatchers.IO) {
                             ArtifactRepository.importPublished(this@M4ChatActivity)
                             ArtifactRepository.list(this@M4ChatActivity, owner)
                         }
-                        events = withContext(Dispatchers.IO) { ChatEventStream.read(this@M4ChatActivity, owner, limit = eventLimit) }
                         delay(1500)
                     }
                 }
@@ -84,11 +78,11 @@ class M4ChatActivity : ComponentActivity() {
                                     }
                                 }
                                 Box(Modifier.weight(1f)) { when (panel) {
-                            "chat" -> ChatScreen(openTerminal = { terminal.open() }, openPanel = { target -> panel = target },
+                            "chat" -> ChatScreen(openTerminal = { panel = "termux" }, openPanel = { target -> panel = target },
                                 runAgent = { goal -> vm.send(goal) },
                                 readAgentProgress = { AgentProgressStore.read(this@M4ChatActivity) },
-                                artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command) }, loadOlderEvents = { eventLimit = (eventLimit + 200).coerceAtMost(5000) }, vm = vm)
-                            "terminal" -> TerminalPanel(terminal)
+                                artifacts = attachments, vm = vm)
+                            "termux" -> TermuxPanel(owner)
                             "files" -> FilesPanel()
                             "tasks" -> SchedulerPanel(owner)
                             "github" -> com.musabgpt.m4.github.GitHubPanel(owner)

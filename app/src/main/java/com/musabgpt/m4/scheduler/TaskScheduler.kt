@@ -103,13 +103,24 @@ class TaskExecutor(context: Context, parameters: WorkerParameters) : Worker(cont
                 "on_ci_event" -> checkCi(task, trigger)
                 else -> true
             }
-            if (matches) AlpineCommandRunner.run(applicationContext, task.command) { isStopped }
-            else CommandResult("condition_not_met", null, "لم يتحقق الشرط؛ لم يُشغل الأمر", "")
+            if (matches) {
+                val receipt = com.musabgpt.m4.terminal.TermuxClient.runApprovedTask(
+                    applicationContext, task
+                )
+                CommandResult(
+                    receipt.optString("status", "failed"),
+                    if (receipt.has("exit_code") && !receipt.isNull("exit_code"))
+                        receipt.getInt("exit_code") else null,
+                    receipt.optString("stdout", ""),
+                    receipt.optString("stderr", receipt.optString("error", "")),
+                    receipt.optBoolean("truncated")
+                )
+            } else CommandResult("condition_not_met", null, "لم يتحقق الشرط؛ لم يُشغل الأمر", "")
         }
             catch (e: Exception) { CommandResult("failed", null, "", e.message ?: "Task execution failed") }
         db.finish(task, run, result)
         if (inputData.getString("manual_key") == null) db.find(task.id)?.let { TaskScheduler.appendDaily(applicationContext, it) }
-        val report = "# ${task.name}\n\nrun_id: $run\nidempotency_key: ${task.id}:$key\nstatus: ${result.status}\nexit_code: ${result.exitCode}\nbackend: alpine (batch)\ntruncated: ${result.truncated}\n\n## stdout\n${result.stdout}\n\n## stderr\n${result.stderr}\n"
+        val report = "# ${task.name}\n\nrun_id: $run\nidempotency_key: ${task.id}:$key\nstatus: ${result.status}\nexit_code: ${result.exitCode}\nbackend: termux (RUN_COMMAND)\ntruncated: ${result.truncated}\n\n## stdout\n${result.stdout}\n\n## stderr\n${result.stderr}\n"
         runCatching { ArtifactRepository.saveReport(applicationContext, task.owner, "task-$run.md", report) }
         // The durable run record is authoritative. Do not re-execute side effects
         // merely because a report export failed or a command returned nonzero.

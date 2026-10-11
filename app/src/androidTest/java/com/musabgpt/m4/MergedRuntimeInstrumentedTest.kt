@@ -24,6 +24,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 
 @RunWith(AndroidJUnit4::class)
 class MergedRuntimeInstrumentedTest {
@@ -35,197 +36,163 @@ class MergedRuntimeInstrumentedTest {
         android.util.Log.i("M4QAReceipt", name + " " + text.take(3500))
     }
 
-    @Test fun chatActionSheetExposesActualMediaAndInlineTerminal() {
+    @Test fun githubRepositoryBrowserIsActuallyReachableFromChatHeader() {
+        activity.onNodeWithTag("open-github").performClick()
+        activity.onNodeWithText("GitHub • M4 / NewAl").assertExists()
+        activity.onNodeWithText("عرض المستودعات").assertExists()
+        evidence("github-panel-navigation.json", JSONObject()
+            .put("opened", true).put("repository_browsing_ui", true).toString(2))
+    }
+
+    @Test fun chatActionSheetExposesMediaAndTermuxWithoutArabicPty() {
+        activity.onNodeWithTag("open-github").assertExists()
         activity.onNodeWithTag("chat-plus").performClick()
         activity.onNodeWithText("الكاميرا").assertExists()
         activity.onNodeWithTag("sheet-skills").assertExists()
         activity.onNodeWithTag("chat-terminal-toggle").performClick()
-        activity.onNodeWithTag("inline-terminal").assertExists()
+        activity.onNodeWithText("Termux — محرك M4").assertExists()
     }
 
-    @Test fun doctorCommandRunsRealOfflineToolchainChecksFromChat() {
+    @Test fun doctorOnlyReportsInstalledTermuxWithoutStartingAlpine() {
         lateinit var vm: ChatViewModel
         activity.runOnIdle {
             vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
             vm.newChat()
             vm.send("/doctor")
         }
-        activity.waitUntil(180000) {
-            !vm.streaming.value &&
-                vm.conversations.value.first { it.id == vm.currentId.value }
-                    .messages.lastOrNull()?.content?.contains("ملاحظة: هذه البيئة Alpine") == true
-        }
         val response = vm.conversations.value.first { it.id == vm.currentId.value }.messages.last().content
-        listOf("Python", "Node.js", "Git", "npm", "Bash").forEach { tool ->
-            assertTrue("Actual $tool tool execution failed: $response", response.contains("✅ $tool:"))
-        }
-        assertTrue(response.contains("المحرك المحلي يعمل"))
-        evidence("doctor.json", JSONObject().put("result", response).toString(2))
+        assertTrue(response.contains("Termux:"))
+        assertTrue(response.contains("RUN_COMMAND"))
+        assertFalse(response.contains("Alpine Linux"))
     }
 
-    @Test fun realWorkManagerTaskRunsPackagedLinuxAndStoresDurableReceipt() {
-        // A database-only test cannot prove scheduled command execution.
-        LinuxEnvironment.install(context)
-        io.musab.arabicterminal.ProjectBootstrap.ensure(LinuxEnvironment.rootfs(context))
-        val suffix = UUID.randomUUID().toString().take(8)
-        val expected = "M4_TASK_" + suffix
+    @Test fun unavailableTermuxCannotBeReportedAsSuccessfulScheduledWork() {
+        val status = com.musabgpt.m4.terminal.TermuxClient.status(context)
+        if (status.optBoolean("installed")) return // Device integration tested separately.
         val db = TaskDatabase.get(context)
-        val task = db.create("qa background execution", "printf '%s%s' 'M4_TASK_' '" + suffix + "'",
-            owner, "once", 1, true)
+        val task = db.create("termux absence", "printf 'M4_SHOULD_NOT_RUN'", owner, "once", 1, true)
         try {
             com.musabgpt.m4.scheduler.TaskScheduler.runNow(context, task)
             activity.waitUntil(90000) {
-                db.lastRun(task.id).contains(expected)
+                db.lastRun(task.id) != "لم تُنفذ المهمة بعد"
             }
-            val durable = db.lastRun(task.id)
-            assertTrue("Worker reported no successful run: " + durable, durable.startsWith("succeeded"))
-            assertTrue("Worker did not execute Linux command: " + durable, durable.contains(expected))
-            assertFalse("Once task must be disabled after execution", db.find(task.id)!!.enabled)
-            evidence("workmanager-execution.json", JSONObject()
-                .put("task_id", task.id)
-                .put("report", durable)
-                .put("executed", true).toString(2))
+            val receipt = db.lastRun(task.id)
+            assertFalse("Termux is missing; do not claim successful execution: " + receipt,
+                receipt.startsWith("succeeded"))
+            evidence("termux-scheduler-missing.json", JSONObject().put("receipt", receipt).toString(2))
         } finally {
             runCatching { com.musabgpt.m4.scheduler.TaskScheduler.pause(context, task.id) }
             runCatching { db.delete(task.id) }
         }
     }
 
-    @Test fun terminalInputFieldReallyExecutesShellFromInsideChat() {
-        lateinit var vm: ChatViewModel
-        activity.runOnIdle {
-            vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
-        }
+    @Test fun visibleTermuxPanelNeverPretendsMissingTermuxExecutedACommand() {
+        val status = com.musabgpt.m4.terminal.TermuxClient.status(context)
+        if (status.optBoolean("installed")) return
         activity.onNodeWithTag("chat-plus").performClick()
         activity.onNodeWithTag("chat-terminal-toggle").performClick()
-        activity.waitUntil(90000) {
-            val state = vm.terminal.state.value
-            !state.preparing && state.selected?.isLinux == true && !state.selected!!.isFinished
+        activity.onNodeWithText("Termux — محرك M4").assertExists()
+        activity.onNodeWithText("نفّذ في Termux").performClick()
+        activity.waitUntil(25000) {
+            activity.onAllNodesWithText("Termux غير مثبت", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
-        val suffix = UUID.randomUUID().toString().take(8)
-        val expected = "M4_UI_INPUT_" + suffix
-        activity.onNodeWithTag("terminal-command-input").performTextInput(
-            "printf '%s%s' 'M4_UI_INPUT_' '" + suffix + "'"
-        )
-        activity.onNodeWithTag("terminal-command-send").performClick()
-        activity.waitUntil(45000) {
-            vm.terminal.state.value.frame?.text?.contains(expected) == true
-        }
-        evidence("terminal-ui-input.json", JSONObject()
-            .put("verified", expected)
-            .put("entrypoint", "Compose TextField -> native PTY -> Alpine shell")
-            .toString(2))
     }
 
-    @Test fun interactiveAlpinePtyActuallyExecutesShellCommands() {
+    @Test fun removedArabicTerminalCannotBeLaunchedOrOverlaid() {
+        val component = android.content.ComponentName(context,
+            io.musab.arabicterminal.TerminalService::class.java)
+        val registered = runCatching {
+            context.packageManager.getServiceInfo(component, 0)
+        }.isSuccess
+        assertFalse("Retired native PTY service must not be in the manifest", registered)
+        val oldActivity = android.content.ComponentName(context, io.musab.arabicterminal.MainActivity::class.java)
+        assertFalse("Retired Arabic terminal activity must not be registered",
+            runCatching { context.packageManager.getActivityInfo(oldActivity, 0) }.isSuccess)
+    }
+
+    @Test fun missingTermuxIsReportedWithoutFallingBackToModelGateways() {
+        if (com.musabgpt.m4.terminal.TermuxClient.status(context).optBoolean("installed")) return
         lateinit var vm: ChatViewModel
         activity.runOnIdle {
             vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
-            vm.terminal.open()
+            vm.newChat()
         }
-        activity.waitUntil(90000) {
-            val state = vm.terminal.state.value
-            !state.preparing && state.selected?.isLinux == true && !state.selected!!.isFinished
+        activity.onNodeWithTag("chat-input").performTextInput("مرحبا")
+        activity.onNodeWithTag("chat-send").performClick()
+        activity.waitUntil(25000) {
+            !vm.streaming.value && vm.conversations.value.first { it.id == vm.currentId.value }
+                .messages.last().content.isNotBlank()
         }
-        // The echoed input does not contain this contiguous marker.
-        // Only a shell that really executed printf can produce the full token.
-        val suffix = UUID.randomUUID().toString().take(8)
-        val expected = "M4_EXECUTED_" + suffix
-        vm.terminal.execute("printf '%s%s' 'M4_EXECUTED_' '" + suffix + "'")
+        val reply = vm.conversations.value.first { it.id == vm.currentId.value }.messages.last().content
+        assertTrue(reply, reply.contains("Termux"))
+        assertFalse(reply.contains("No available gateway"))
+        assertFalse(reply.contains("provider_fallback"))
+    }
+    @Test fun termuxPendingIntentContractAcceptsActualResultOkMinusOne() {
+        val commandId = UUID.randomUUID().toString()
+        val nonce = UUID.randomUUID().toString()
+        val folder = File(context.filesDir, "termux-results/" + commandId).apply { mkdirs() }
+        File(folder, "request.json").writeText(
+            JSONObject().put("owner", owner).put("nonce", nonce)
+                .put("command", JSONObject().put("executable", "python")).toString()
+        )
         try {
-            activity.waitUntil(45000) {
-                vm.terminal.state.value.frame?.text?.contains(expected) == true
+            val result = android.os.Bundle().apply {
+                putInt("err", android.app.Activity.RESULT_OK)
+                putInt("exitCode", 0)
+                putString("stdout", "M4_TERMUX_OK")
+                putString("stderr", "")
             }
-        } catch (failure: Throwable) {
-            val state = vm.terminal.state.value
-            evidence("pty-command-failure.json", JSONObject()
-                .put("session_finished", state.selected?.isFinished ?: true)
-                .put("runtime", state.status)
-                .put("preparing", state.preparing)
-                .put("display_tail", state.frame?.text?.takeLast(1500) ?: "")
-                .put("exception", failure.javaClass.simpleName).toString(2))
-            throw failure
+            val incoming = android.content.Intent(context,
+                com.musabgpt.m4.terminal.TermuxResultReceiver::class.java)
+                .setData(android.net.Uri.parse("m4-termux://result/$commandId/$nonce"))
+                .putExtra("result", result)
+            com.musabgpt.m4.terminal.TermuxClient.receive(context, incoming)
+            val receipt = com.musabgpt.m4.terminal.TermuxClient.output(context, owner, commandId)
+            assertEquals("succeeded", receipt.getString("status"))
+            assertEquals(0, receipt.getInt("exit_code"))
+            assertEquals("M4_TERMUX_OK", receipt.getString("stdout"))
+        } finally {
+            folder.deleteRecursively()
         }
-        // Verify that the packaged development programs execute, not that the
-        // terminal merely displays their command lines. Split marker literals
-        // inside each command so an input echo cannot satisfy the assertion.
-        val pythonOutput = "M4_PY_" + suffix + "_OK"
-        vm.terminal.execute("python3 -c \"print('M4_' + 'PY_' + '" + suffix + "' + '_OK')\"")
-        activity.waitUntil(45000) {
-            vm.terminal.state.value.frame?.text?.contains(pythonOutput) == true
-        }
-        val nodeOutput = "M4_NODE_" + suffix + "_OK"
-        vm.terminal.execute("node -e \"process.stdout.write('M4_' + 'NODE_' + '" + suffix + "' + '_OK')\"")
-        activity.waitUntil(45000) {
-            vm.terminal.state.value.frame?.text?.contains(nodeOutput) == true
-        }
-        vm.terminal.execute("git --version")
-        activity.waitUntil(45000) {
-            vm.terminal.state.value.frame?.text?.contains("git version ") == true
-        }
-        evidence("pty-command.json", JSONObject()
-            .put("verified_output", expected)
-            .put("verified_python", pythonOutput)
-            .put("verified_node", nodeOutput)
-            .put("verified_git", true)
-            .put("terminal", vm.terminal.state.value.status).toString(2))
     }
 
-    @Test fun firstMessageUsesRealPackagedPythonThroughTheVisibleSendButton() {
-        // Only the external model is replaced. Installation, checkout, native
-        // PTY/PRoot, packaged Python, request/events/response and UI are real.
-        val server = java.net.ServerSocket(1337, 1, java.net.InetAddress.getByName("127.0.0.1"))
-        server.soTimeout = 180000
-        val received = java.util.concurrent.atomic.AtomicReference<String>()
-        val fixture = Thread {
-            runCatching { server.accept().use { socket ->
-                socket.soTimeout = 15000
-                val input = java.io.DataInputStream(socket.getInputStream())
-                var length = 0
-                while (true) { val line = input.readLine() ?: break; if (line.isEmpty()) break; if (line.startsWith("Content-Length:", true)) length = line.substringAfter(':').trim().toInt() }
-                require(length in 1..1000000)
-                val bytes = ByteArray(length); input.readFully(bytes); received.set(String(bytes, Charsets.UTF_8))
-                val body = """{"model":"qa-protocol-fixture","choices":[{"message":{"role":"assistant","content":"مرحباً، المحادثة جاهزة."}}]}""".toByteArray(Charsets.UTF_8)
-                val output = socket.getOutputStream()
-                output.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray()); output.write(body); output.flush()
-            } }
-        }.apply { isDaemon = true; start() }
-        lateinit var vm: ChatViewModel
-        activity.runOnIdle { vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]; vm.newChat(); vm.selectProvider(1) }
-        try {
-            activity.onNodeWithTag("chat-input").performTextInput("مرحبا")
-            activity.onNodeWithTag("chat-send").performClick()
+    @Test fun termuxPendingIntentMustRejectMissingOrErroneousReturnCode() {
+        listOf(0, 17).forEach { badErr ->
+            val commandId = UUID.randomUUID().toString()
+            val nonce = UUID.randomUUID().toString()
+            val folder = File(context.filesDir, "termux-results/" + commandId).apply { mkdirs() }
+            File(folder, "request.json").writeText(JSONObject()
+                .put("owner", owner).put("nonce", nonce).put("command", JSONObject()).toString())
             try {
-                activity.waitUntil(180000) {
-                    !vm.streaming.value && vm.conversations.value.first { it.id == vm.currentId.value }.messages.any { it.role == "assistant" }
+                val result = android.os.Bundle().apply {
+                    putInt("err", badErr)
+                    putInt("exitCode", 0)
+                    putString("stdout", "UNTRUSTWORTHY")
                 }
-            } catch (failure: Throwable) {
-                val messages = vm.conversations.value.first { it.id == vm.currentId.value }.messages
-                val diagnostics = JSONObject()
-                    .put("streaming", vm.streaming.value)
-                    .put("runtime", vm.terminal.state.value.status)
-                    .put("message_roles", org.json.JSONArray(messages.map { it.role }))
-                    .put("assistant_count", messages.count { it.role == "assistant" })
-                    .put("fixture_received_request", received.get() != null)
-                    .put("alpine_installed", LinuxEnvironment.installed(context))
-                    .put("project_present", File(LinuxEnvironment.rootfs(context), "root/projects/M4/.git").isDirectory)
-                    .put("exception", failure.javaClass.simpleName)
-                    .put("terminal_tail", vm.terminal.state.value.frame?.text?.takeLast(2400) ?: "")
-                    .put("runtime_preparing", vm.terminal.state.value.preparing)
-                evidence("first-message-failure.json", diagnostics.toString(2))
-                throw failure
+                com.musabgpt.m4.terminal.TermuxClient.receive(
+                    context,
+                    android.content.Intent(context,
+                        com.musabgpt.m4.terminal.TermuxResultReceiver::class.java)
+                        .setData(android.net.Uri.parse("m4-termux://result/$commandId/$nonce"))
+                        .putExtra("result", result)
+                )
+                assertEquals("blocked",
+                    com.musabgpt.m4.terminal.TermuxClient.output(context, owner, commandId)
+                        .getString("status"))
+            } finally {
+                folder.deleteRecursively()
             }
-            val messages = vm.conversations.value.first { it.id == vm.currentId.value }.messages
-            val reply = messages.last { it.role == "assistant" }.content
-            evidence("first-message.json", JSONObject().put("reply", reply).put("runtime", vm.terminal.state.value.status).put("model_request_received", received.get() != null).toString(2))
-            assertEquals("مرحباً، المحادثة جاهزة.", reply)
-            assertTrue(received.get().contains("مرحبا"))
-            assertTrue(File(LinuxEnvironment.rootfs(context), "root/projects/M4/.git").isDirectory)
-            assertTrue(
-                "Chat must work without binding/spawning a terminal PTY",
-                vm.terminal.state.value.sessions.isEmpty()
-            )
-        } finally { server.close(); fixture.join(1000) }
+        }
+    }
+
+    @Test fun youtubeCompositeIntentParsesWithoutLlmOrToolGateway() {
+        val item = com.musabgpt.m4.phone.YouTubeActions.parse(
+            "افتح يوتيوب وابحث عن مسلسل باب الحارة وشغلي الفيديو"
+        )
+        assertNotNull(item)
+        assertEquals("مسلسل باب الحارة", item!!.query)
+        assertTrue(item.play)
     }
 
     @Test fun ownedHtmlIsClickedTypedAssertedAndCaptured() {

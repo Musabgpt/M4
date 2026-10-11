@@ -21,20 +21,54 @@ object TermuxClient {
         return JSONObject().put("installed", installed).put("permission_granted", context.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED)
             .put("external_apps", "unknown_until_command_result").put("backend", "termux")
     }
-    fun run(context: Context, args: JSONObject, owner: String): JSONObject {
-        if (!status(context).getBoolean("installed")) return JSONObject().put("status", "unavailable").put("error", "Termux غير مثبت؛ الطرفية المدمجة تعمل بدونه")
+    fun run(context: Context, args: JSONObject, owner: String): JSONObject =
+        execute(context, args, owner, preapproved = false)
+
+    /**
+     * A previously approved, immutable scheduled command may run in background
+     * without an interactive dialog. Verify ownership, command and enabled
+     * state directly at the authorization boundary.
+     */
+    fun runApprovedTask(context: Context, task: com.musabgpt.m4.scheduler.ScheduledTask): JSONObject {
+        val current = com.musabgpt.m4.scheduler.TaskDatabase.get(context).find(task.id)
+            ?: return JSONObject().put("status", "denied").put("error", "المهمة لم تعد موجودة")
+        require(current.id == task.id && current.owner == task.owner &&
+            current.command == task.command && current.enabled) {
+            "فشل التحقق من صلاحية الأمر المجدول"
+        }
+        val request = JSONObject().put("executable", "bash")
+            .put("arguments", org.json.JSONArray(listOf("-lc", task.command)))
+            .put("timeout", 90)
+        return execute(context, request, task.owner, preapproved = true)
+    }
+
+    private fun execute(context: Context, args: JSONObject, owner: String, preapproved: Boolean): JSONObject {
+        if (!status(context).getBoolean("installed")) return JSONObject().put("status", "unavailable").put("error", "Termux غير مثبت؛ لا يوجد تشغيل بديل عبر الطرفية العربية.")
         val executable = args.getString("executable")
         require(executable.matches(Regex("[a-zA-Z][a-zA-Z0-9_.-]{0,80}"))) { "اسم برنامج Termux غير صالح" }
         val arguments = args.optJSONArray("arguments") ?: org.json.JSONArray()
-        require(arguments.length() <= 50 && arguments.toString().length <= 12000)
+        // An embedded, reviewed Python worker is ~9 KB and user prompts may be
+        // longer. Keep the payload well below Android's Binder limit.
+        require(arguments.length() <= 50 && arguments.toString().length <= 180000)
         val cwd = args.optString("cwd", "/data/data/com.termux/files/home")
         require(cwd.startsWith("/data/data/com.termux/files/") && !cwd.split('/').contains(".."))
-        if (!CapabilityBroker.request(owner, "تشغيل داخل Termux", args)) return JSONObject().put("status", "denied").put("error", "رفض المستخدم أمر Termux")
-        if (context.checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED && !HostPermissionRequest.request(PERMISSION))
-            return JSONObject().put("status", "permission_required").put("needs", PERMISSION).put("error", "لم تمنح صلاحية Termux RUN_COMMAND")
+        if (!preapproved && !CapabilityBroker.request(owner, "تشغيل داخل Termux", args))
+            return JSONObject().put("status", "denied").put("error", "رفض المستخدم أمر Termux")
+        if (context.checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED) {
+            if (preapproved || !HostPermissionRequest.request(PERMISSION))
+                return JSONObject().put("status", "permission_required").put("needs", PERMISSION)
+                    .put("error", "يلزم منح صلاحية Termux RUN_COMMAND من إعدادات Android")
+        }
         val id = UUID.randomUUID().toString(); val nonce = UUID.randomUUID().toString()
         val folder = File(directory(context), id).apply { mkdirs() }
-        File(folder, "request.json").writeText(JSONObject().put("owner", owner).put("nonce", nonce).put("command", args).toString())
+        // Receipts need ownership and nonce, not a durable plaintext copy of
+        // user prompts or shell arguments.
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(args.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        File(folder, "request.json").writeText(JSONObject()
+            .put("owner", owner).put("nonce", nonce)
+            .put("command_sha256", digest).toString())
         val callback = Intent(context, TermuxResultReceiver::class.java).setData(Uri.parse("m4-termux://result/$id/$nonce"))
         val pending = PendingIntent.getBroadcast(context, id.hashCode(), callback, PendingIntent.FLAG_ONE_SHOT or
             (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0))
@@ -43,7 +77,12 @@ object TermuxClient {
             .putExtra("com.termux.RUN_COMMAND_ARGUMENTS", Array(arguments.length()) { arguments.getString(it) })
             .putExtra("com.termux.RUN_COMMAND_WORKDIR", cwd).putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
             .putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", pending)
-        try { context.startService(command) }
+        // Android 8+ background limits: NewAl used startForegroundService for
+        // the official Termux RUN_COMMAND service, not startService.
+        try {
+            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(command)
+            else context.startService(command)
+        }
         catch (e: Exception) { pending.cancel(); return JSONObject().put("status", "blocked").put("error", "Termux لم يقبل الأمر: ${e.message}") }
         val end = System.nanoTime() + args.optInt("timeout", 60).coerceIn(1, 120) * 1_000_000_000L
         val response = File(folder, "result.json")
@@ -65,13 +104,17 @@ object TermuxClient {
         val folder = File(directory(context), segments[0]); val request = runCatching { JSONObject(File(folder, "request.json").readText()) }.getOrNull() ?: return
         if (request.getString("nonce") != segments[1] || File(folder, "result.json").exists()) return
         val bundle = intent.getBundleExtra("result") ?: return
-        val error = bundle.getInt("err", 0); val hasExit = bundle.containsKey("exitCode")
+        // Official Termux service returns Activity.RESULT_OK (-1) when there
+        // are no internal errors. Zero is NOT a successful return code here.
+        val error = bundle.getInt("err", Int.MIN_VALUE)
+        val hasExit = bundle.containsKey("exitCode")
         val row = JSONObject().put("backend", "termux").put("command_id", segments[0])
             .put("exit_code", if (hasExit) bundle.getInt("exitCode") else JSONObject.NULL)
             .put("stdout", bundle.getString("stdout", "").take(64000)).put("stderr", bundle.getString("stderr", "").take(64000))
-            .put("status", if (error != 0 || !hasExit) "blocked" else if (bundle.getInt("exitCode") == 0) "succeeded" else "failed")
+            .put("status", if (error != android.app.Activity.RESULT_OK || !hasExit) "blocked"
+                else if (bundle.getInt("exitCode") == 0) "succeeded" else "failed")
             .put("truncated", bundle.getInt("stdout_original_length", 0) > 64000 || bundle.getInt("stderr_original_length", 0) > 64000)
-        if (error != 0) row.put("error", bundle.getString("errmsg", "Termux command rejected").take(1000))
+        if (error != android.app.Activity.RESULT_OK) row.put("error", bundle.getString("errmsg", "Termux command rejected").take(1000))
         val artifact = ArtifactRepository.saveReport(context, request.getString("owner"), "termux-${segments[0]}.md", "# Termux command receipt\n\n```json\n${row.toString(2)}\n```\n")
         row.put("report_artifact", artifact.json())
         val temporary = File(folder, ".result.tmp"); temporary.writeText(row.toString()); require(temporary.renameTo(File(folder, "result.json")))

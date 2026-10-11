@@ -1,4 +1,4 @@
-name: بناء الطرفية العربية APK
+name: M4 — Termux-backed Android APK
 on:
   push:
     branches: [main]
@@ -23,7 +23,7 @@ jobs:
           SDKMANAGER="$(find "${ANDROID_HOME}/cmdline-tools" -type f -name sdkmanager | head -n 1)"
           test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1'
+          "$SDKMANAGER" 'platforms;android-36' 'build-tools;36.0.0'
       - name: اختبار وكيل البرمجة والاستمرارية والأمان
         run: |
           sudo apt-get update -qq
@@ -33,30 +33,6 @@ jobs:
           bash -n agent/term-agent.sh agent/term-agent-watch.sh agent/m4-agent-start.sh
       - name: Verify chat startup failure receipts
         run: bash tests/test_agent_launch_receipt.sh
-      - name: تضمين Alpine Linux وPRoot بالتحقق من البصمات
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq patchelf
-          python3 -m py_compile scripts/fetch-linux.py
-          bash -n scripts/build-signed-release.sh
-          bash -n scripts/bundle-linux.sh
-          bash scripts/bundle-linux.sh
-      - name: فحص أدوات لينكس المدمجة
-        run: |
-          test -s app/src/main/assets/alpine-rootfs.tgz
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/python3'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/git'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/node'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/npm'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/term-agent'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/term-agent/agent.py'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/term-agent/provider_routes.py'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/term-agent/system_prompt.md'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/term-agent-watch'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/local/bin/m4-agent-start'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/m4-seed/app/src/main/java/com/musabgpt/m4/ChatScreen.kt'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './opt/m4-seed/.git/HEAD'
-          tar -tzf app/src/main/assets/alpine-rootfs.tgz | grep -Fq './usr/bin/pytest'
       - name: تثبيت Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -84,6 +60,19 @@ jobs:
           java -cp tests/out RootArchiveImporterTest
       - name: بناء APK عبر Android SDK وNDK
         run: gradle --no-daemon --stacktrace testDebugUnitTest assembleDebug
+      - name: Ensure APK excludes Alpine PRoot and native Arabic PTY
+        run: |
+          python3 - <<'PY'
+          import zipfile
+          apk = 'app/build/outputs/apk/debug/app-debug.apk'
+          with zipfile.ZipFile(apk) as archive:
+              blocked = [n for n in archive.namelist()
+                         if any(term in n.lower() for term in
+                                ('alpine-rootfs', 'libproot', 'libarabicpty'))]
+          if blocked:
+              raise SystemExit('Legacy native binaries still present: ' + repr(blocked))
+          print('PASS: only Termux external runtime is used')
+          PY
       - name: تحقق من توقيع وبصمة APK
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk

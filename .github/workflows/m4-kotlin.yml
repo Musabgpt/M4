@@ -21,7 +21,7 @@ jobs:
           gradle-version: '8.13'
       - name: Compile Kotlin and Java with portable JVM tests (no Alpine download)
         # The APK workflow bundles Alpine and runs the complete suite, including
-        # bundledAlpineExtractsAllProgramsWithoutPrivilegedHardlinks.
+        # termuxMigrationDoesNotBundleAlpineRootfs.
         run: >-
           gradle --no-daemon :app:compileDebugKotlin :app:compileDebugJavaWithJavac
           :app:testDebugUnitTest --tests 'com.musabgpt.m4.*'

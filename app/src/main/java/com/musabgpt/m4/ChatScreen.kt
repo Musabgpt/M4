@@ -51,7 +51,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
-import com.musabgpt.m4.terminal.TerminalPanel
 import com.musabgpt.m4.artifacts.ArtifactChatCard
 import com.musabgpt.m4.artifacts.ChatArtifact
 import com.musabgpt.m4.runtime.RuntimeEvent
@@ -126,7 +125,6 @@ fun ChatScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
-    var terminalExpanded by rememberSaveable { mutableStateOf(false) }
     var addSheet by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var showAgentConfirm by remember { mutableStateOf(false) }
@@ -143,10 +141,7 @@ fun ChatScreen(
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::attach) }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(vm::attach) }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap -> bitmap?.let(vm::attachCamera) }
-    fun toggleTerminal() {
-        terminalExpanded = !terminalExpanded
-        if (terminalExpanded) openTerminal()
-    }
+    fun toggleTerminal() { openPanel("termux") }
     if (addSheet) {
         ModalBottomSheet(onDismissRequest = { addSheet = false }, containerColor = colors.surface) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -158,7 +153,7 @@ fun ChatScreen(
                 }
                 HorizontalDivider()
                 TextButton(onClick = { addSheet = false; openPanel("browser") }) { Text("البحث والمتصفح") }
-                TextButton(onClick = { addSheet = false; toggleTerminal() }, modifier = Modifier.testTag("chat-terminal-toggle")) { Text("الطرفية داخل المحادثة") }
+                TextButton(onClick = { addSheet = false; toggleTerminal() }, modifier = Modifier.testTag("chat-terminal-toggle")) { Text("Termux — أوامر حقيقية") }
                 TextButton(onClick = { addSheet = false; openPanel("tools") }, modifier = Modifier.testTag("sheet-skills")) { Text("المهارات والإضافات") }
                 TextButton(onClick = { addSheet = false; openPanel("tasks") }) { Text("المهام المجدولة") }
                 TextButton(onClick = { addSheet = false; showAgentConfirm = true }, enabled = input.isNotBlank() && !isStreaming) { Text("تنفيذ المشروع باستخدام الأدوات") }
@@ -181,9 +176,9 @@ fun ChatScreen(
     if (showAgentConfirm) {
         AlertDialog(
             onDismissRequest = { showAgentConfirm = false },
-            title = { Text("تنفيذ المهمة في الطرفية العربية") },
+            title = { Text("تنفيذ المهمة عبر NewAl داخل Termux") },
             text = { Text(if (permissionMode == "plan_only") "سيقرأ وكيل M4 المشروع ويعد خطة؛ أدوات التعديل والتنفيذ محظورة في هذا الوضع."
-                else "سيعمل وكيل M4 على ملفات المشروع باستخدام Alpine المدمجة. قد ينفذ أوامر تغيّر الملفات؛ راجع المشروع واحفظ نسخك المهمة.") },
+                else "يستخدم M4 وكيل NewAl الموجود في Termux. قد ينفذ أدوات تغيّر الملفات؛ وافق على الأعمال الحساسة بعد مراجعتها.") },
             confirmButton = {
                 TextButton(onClick = {
                     showAgentConfirm = false
@@ -249,7 +244,7 @@ fun ChatScreen(
                 val links = listOf(
                     "المحادثات" to "chat",
                     "المشاريع" to "github",
-                    "الكود والطرفية" to "terminal",
+                    "Termux" to "termux",
                     "الملفات والمرفقات" to "files",
                     "المهارات والإضافات" to "tools",
                     "المهام" to "tasks",
@@ -261,8 +256,7 @@ fun ChatScreen(
                         selected = false,
                         onClick = {
                             scope.launch { drawerState.close() }
-                            if (target == "terminal") toggleTerminal()
-                            else if (target != "chat") openPanel(target)
+                            if (target != "chat") openPanel(target)
                         },
                         modifier = Modifier.padding(horizontal = 12.dp)
                     )
@@ -315,29 +309,7 @@ fun ChatScreen(
                         containerColor = colors.background
                     ),
                     title = {
-                        Box {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { menuOpen = true }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Text(provider.name, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                                Text(" ▾", fontSize = 14.sp, color = colors.onSurfaceVariant)
-                            }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                providers.forEachIndexed { index, p ->
-                                    DropdownMenuItem(
-                                        text = { Text(p.name) },
-                                        onClick = {
-                                            vm.selectProvider(index)
-                                            menuOpen = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
+                        Text("M4 • NewAl / Termux", fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     },
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
@@ -345,6 +317,9 @@ fun ChatScreen(
                         }
                     },
                     actions = {
+                        TextButton(onClick = { openPanel("github") }, modifier = Modifier.testTag("open-github")) {
+                            Text("GitHub")
+                        }
                         IconButton(onClick = vm::newChat) {
                             Icon(Icons.Filled.Add, contentDescription = "محادثة جديدة")
                         }
@@ -369,22 +344,12 @@ fun ChatScreen(
                             listOf("auto_project" to "تنفيذ داخل المشروع", "accept_edits" to "تعديل الملفات، اسأل قبل التشغيل", "ask_always" to "اسأل قبل كل تعديل وتشغيل", "plan_only" to "تخطيط للقراءة فقط").forEach { (mode, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { vm.setPermissionMode(mode); permissionsOpen = false }) }
                         }
                     }
-                    if (terminalExpanded) {
-                        Surface(color = colors.surfaceVariant, modifier = Modifier.fillMaxWidth().height(275.dp).testTag("inline-terminal")) {
-                            TerminalPanel(vm.terminal)
-                        }
-                    }
                     InputBar(
                         text = input,
                         onTextChange = { input = it },
                         isStreaming = isStreaming,
                         onSend = {
-                            if (input.trim().startsWith("!")) {
-                                vm.recordTerminalRequest(input.trim())
-                                executeCommand(input.trim().drop(1))
-                                terminalExpanded = true
-                                openTerminal()
-                            } else vm.send(input)
+                            vm.send(input)
                             input = ""
                         },
                         onStop = vm::stop,
@@ -393,7 +358,7 @@ fun ChatScreen(
                 }
             }
         ) { padding ->
-            if (current.messages.isEmpty() && artifacts.isEmpty() && runtimeEvents.isEmpty()) {
+            if (current.messages.isEmpty() && artifacts.isEmpty()) {
                 Column(
                     modifier = Modifier.padding(padding).fillMaxSize().padding(32.dp),
                     verticalArrangement = Arrangement.Center,
@@ -424,8 +389,6 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
                     items(artifacts.reversed(), key = { "artifact-" + it.id }) { artifact -> ArtifactChatCard(artifact) }
-                    if (runtimeEvents.size >= 100) item { TextButton(onClick = loadOlderEvents) { Text("تحميل سجل أقدم") } }
-                    items(runtimeEvents.filter { it.kind in setOf("tool_started", "tool_finished", "turn_finished", "notice", "hook_error", "provider_fallback", "provider_route") }.groupBy { if (it.callId.isNotBlank()) "call-${it.turn}-${it.callId}" else "event-${it.id}" }.values.map { it.last() }.sortedByDescending { it.time }, key = { "event-" + it.id }) { event -> InteractiveToolCard(event) }
                     items(current.messages.reversed(), key = { it.id }) { msg ->
                         MessageRow(
                             msg = msg,

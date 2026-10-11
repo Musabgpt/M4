@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">الطرفية العربية</string>
+    <string name="app_name">M4 • MusabAI</string>
     <string name="accessibility_description">خدمة اختيارية للتحكم المباشر بالهاتف بالأوامر العربية. يمكنها تنفيذ الرجوع والرئيسية والتمرير والنقر على عناصر الشاشة عندما تطلب ذلك. لا تسجل محتوى الشاشة ولا ترسل البيانات للخارج. يمكنك إيقافها من إعدادات إمكانية الوصول.</string>
 </resources>

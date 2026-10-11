@@ -45,19 +45,12 @@ public final class SafeRootfsExtractorTest {
             assertTrue(Files.isSymbolicLink(dir.resolve("usr/bin/unzip-tool")));
         }
     }
-    @Test public void bundledAlpineExtractsAllProgramsWithoutPrivilegedHardlinks()throws Exception {
-        File bundle=new File("src/main/assets/alpine-rootfs.tgz");
-        assertTrue("CI must bundle Alpine before unit tests",bundle.isFile());
-        Path target=Files.createTempDirectory("alpine-full-rootfs-");
-        try(TarArchiveInputStream input=new TarArchiveInputStream(
-                new GZIPInputStream(Files.newInputStream(bundle.toPath())))){
-            SafeRootfsExtractor.extract(input,target.toFile());
-        }
-        assertTrue(Files.exists(target.resolve("bin/bash")));
-        assertTrue(Files.exists(target.resolve("usr/bin/python3")));
-        assertTrue(Files.exists(target.resolve("usr/bin/git")));
-        assertTrue(Files.exists(target.resolve("usr/bin/node")));
-        assertTrue(Files.exists(target.resolve("usr/bin/npm")));
-        assertTrue(Files.exists(target.resolve("usr/bin/zipinfo")));
+    @Test public void termuxMigrationDoesNotBundleAlpineRootfs() {
+        File obsolete=new File("src/main/assets/alpine-rootfs.tgz");
+        assertFalse("Termux-only APK must never carry Alpine rootfs", obsolete.exists());
+        assertFalse("M4 must not package native PRoot",
+            new File("src/main/jniLibs/arm64-v8a/libproot.so").exists());
+        assertFalse("M4 must not package native PTY",
+            new File("src/main/jniLibs/arm64-v8a/libarabicpty.so").exists());
     }
 }
