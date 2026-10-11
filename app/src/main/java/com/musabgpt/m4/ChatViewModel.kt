@@ -91,9 +91,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString("permission_mode", mode).apply()
     }
     private var currentTurn: String? = null
-    fun pause() { currentTurn?.let { terminal.control(it, "pause") } }
-    fun resume() { currentTurn?.let { terminal.control(it, "resume") } }
-    fun steer(text: String) { currentTurn?.let { terminal.control(it, "steer", text) } }
+    // NewAl's session API is remote to Android and cannot be controlled
+    // using obsolete Alpine control files. Do not claim these actions worked.
+    fun pause() {
+        stop()
+        notice("تم إلغاء انتظار الرد في M4. تحقق من مهمة NewAl داخل Termux قبل إعادة التشغيل.")
+    }
+    fun resume() { notice("استئناف NewAl يتطلب فتح الجلسة داخل Termux؛ لم تُستأنف المهمة تلقائياً.") }
+    fun steer(text: String) {
+        notice("التوجيه اللحظي غير متصل بوحدة NewAl بعد؛ أرسل التعليمات في رسالة جديدة بعد انتهاء المهمة.")
+    }
+    private fun notice(text: String) {
+        val id = _currentId.value
+        edit(id) { c -> c.copy(messages = c.messages + UiMessage(role = "assistant", content = text)) }
+        saveHistory()
+    }
     init {
         com.musabgpt.m4.runtime.AgentControl.onStop = { stop() }
         // Legacy configuration has no meaning and may contain old API secrets.
