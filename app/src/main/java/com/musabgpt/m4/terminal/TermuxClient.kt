@@ -22,7 +22,7 @@ object TermuxClient {
             .put("external_apps", "unknown_until_command_result").put("backend", "termux")
     }
     fun run(context: Context, args: JSONObject, owner: String): JSONObject {
-        if (!status(context).getBoolean("installed")) return JSONObject().put("status", "unavailable").put("error", "Termux غير مثبت؛ الطرفية المدمجة تعمل بدونه")
+        if (!status(context).getBoolean("installed")) return JSONObject().put("status", "unavailable").put("error", "Termux غير مثبت؛ لا يوجد تشغيل بديل عبر الطرفية العربية.")
         val executable = args.getString("executable")
         require(executable.matches(Regex("[a-zA-Z][a-zA-Z0-9_.-]{0,80}"))) { "اسم برنامج Termux غير صالح" }
         val arguments = args.optJSONArray("arguments") ?: org.json.JSONArray()
@@ -65,11 +65,15 @@ object TermuxClient {
         val folder = File(directory(context), segments[0]); val request = runCatching { JSONObject(File(folder, "request.json").readText()) }.getOrNull() ?: return
         if (request.getString("nonce") != segments[1] || File(folder, "result.json").exists()) return
         val bundle = intent.getBundleExtra("result") ?: return
-        val error = bundle.getInt("err", 0); val hasExit = bundle.containsKey("exitCode")
+        // Official Termux service returns Activity.RESULT_OK (-1) when there
+        // are no internal errors. Zero is NOT a successful return code here.
+        val error = bundle.getInt("err", Int.MIN_VALUE)
+        val hasExit = bundle.containsKey("exitCode")
         val row = JSONObject().put("backend", "termux").put("command_id", segments[0])
             .put("exit_code", if (hasExit) bundle.getInt("exitCode") else JSONObject.NULL)
             .put("stdout", bundle.getString("stdout", "").take(64000)).put("stderr", bundle.getString("stderr", "").take(64000))
-            .put("status", if (error != 0 || !hasExit) "blocked" else if (bundle.getInt("exitCode") == 0) "succeeded" else "failed")
+            .put("status", if (error != android.app.Activity.RESULT_OK || !hasExit) "blocked"
+                else if (bundle.getInt("exitCode") == 0) "succeeded" else "failed")
             .put("truncated", bundle.getInt("stdout_original_length", 0) > 64000 || bundle.getInt("stderr_original_length", 0) > 64000)
         if (error != 0) row.put("error", bundle.getString("errmsg", "Termux command rejected").take(1000))
         val artifact = ArtifactRepository.saveReport(context, request.getString("owner"), "termux-${segments[0]}.md", "# Termux command receipt\n\n```json\n${row.toString(2)}\n```\n")
