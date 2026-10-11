@@ -12,7 +12,8 @@ class SigningContractTests(unittest.TestCase):
     def test_debug_package_is_separate_from_release(self):
         s=(ROOT/"app/build.gradle").read_text()
         self.assertIn("applicationId 'dev.newal.code.lite.connectors'",s)
-        self.assertIn("applicationIdSuffix '.m4dev'",s)
+        self.assertIn("applicationIdSuffix '.m4repair'",s)
+        self.assertNotIn("applicationIdSuffix '.m4dev'",s)
         self.assertIn("10000",s)
         self.assertNotIn("signingConfig signingConfigs.debug",s)
     def test_no_unsigned_update_published(self):
