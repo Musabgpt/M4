@@ -1,0 +1,5 @@
+[
+ {"id":"gpt4free-local","family":"gpt4free","name":"GPT4Free local API","base_url":"http://127.0.0.1:1337/v1","model":"auto","local":true},
+ {"id":"free-llm-gateway-local","family":"free-llm-gateway","name":"MrFadiAi local gateway","base_url":"http://127.0.0.1:8080/v1","model":"auto","local":true},
+ {"id":"free-llm-api-local","family":"free-llm-api","name":"PryxIntel local gateway","base_url":"http://127.0.0.1:3001/v1","model":"auto","local":true}
+]

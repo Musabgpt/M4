@@ -1,0 +1,9 @@
+[
+ {"id":"groq","family":"keyed-free","name":"Groq","base_url":"https://api.groq.com/openai/v1","model":"CHECK-MODEL-AT-IMPLEMENTATION","auth_env":"M4_KEY_GROQ","tools":"unknown","enabled":false},
+ {"id":"gemini","family":"keyed-free","name":"Google Gemini (OpenAI-compat)","base_url":"https://generativelanguage.googleapis.com/v1beta/openai","model":"CHECK-MODEL-AT-IMPLEMENTATION","auth_env":"M4_KEY_GEMINI","tools":"unknown","enabled":false},
+ {"id":"cerebras","family":"keyed-free","name":"Cerebras","base_url":"https://api.cerebras.ai/v1","model":"CHECK-MODEL-AT-IMPLEMENTATION","auth_env":"M4_KEY_CEREBRAS","tools":"unknown","enabled":false},
+ {"id":"openrouter-free","family":"keyed-free","name":"OpenRouter (:free models)","base_url":"https://openrouter.ai/api/v1","model":"CHECK-MODEL-AT-IMPLEMENTATION","auth_env":"M4_KEY_OPENROUTER","tools":"unknown","enabled":false},
+ {"id":"mistral","family":"keyed-free","name":"Mistral La Plateforme","base_url":"https://api.mistral.ai/v1","model":"CHECK-MODEL-AT-IMPLEMENTATION","auth_env":"M4_KEY_MISTRAL","tools":"unknown","enabled":false},
+ {"id":"sambanova","family":"keyed-free","name":"SambaNova Cloud","base_url":"https://api.sambanova.ai/v1","model":"CHECK-MODEL-AT-IMPLEMENTATION","auth_env":"M4_KEY_SAMBANOVA","tools":"unknown","enabled":false},
+ {"id":"github-models","family":"keyed-free","name":"GitHub Models","base_url":"https://models.github.ai/inference","model":"CHECK-MODEL-AT-IMPLEMENTATION","auth_env":"M4_KEY_GITHUB_MODELS","tools":"unknown","enabled":false}
+]
