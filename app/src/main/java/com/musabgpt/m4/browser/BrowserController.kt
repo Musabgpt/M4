@@ -2,6 +2,10 @@ package com.musabgpt.m4.browser
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.app.Activity
+import android.graphics.Rect
+import android.view.PixelCopy
+
 import android.os.Handler
 import android.os.Looper
 import android.webkit.*
@@ -93,10 +97,65 @@ class BrowserController(private val context: Context) {
             } while (true)
         }
         if (artifactOwner != owner && !CapabilityBroker.request(owner, "إجراء داخل الموقع: $action", args)) return JSONObject().put("status", "denied").put("error", "رفض الإجراء")
-        if (action == "screenshot") return AndroidPhoneTools.onMain {
-            val bitmap = Bitmap.createBitmap(view.width.coerceIn(1, 1440), view.height.coerceIn(1, 2400), Bitmap.Config.ARGB_8888); view.draw(android.graphics.Canvas(bitmap))
-            val output = java.io.ByteArrayOutputStream(); bitmap.compress(Bitmap.CompressFormat.PNG, 100, output); bitmap.recycle()
-            ArtifactRepository.saveBinary(context, owner, args.optString("name", "browser.png"), "image/png", output.toByteArray()).json().put("status", "verified").put("published", true)
+        if (action == "screenshot") {
+            // WebView's hardware compositor is not reliably captured by
+            // view.draw(Canvas); it may save an all-white PNG while DOM works.
+            // PixelCopy must run asynchronously: we are on a worker thread,
+            // and the callback must remain free to execute on the UI thread.
+            val activity = context as? Activity
+                ?: return JSONObject().put("status", "unavailable")
+                    .put("error", "لقطة الشاشة تتطلب نافذة Android حقيقية")
+            val bounds = AndroidPhoneTools.onMain {
+                if (!view.isShown || view.width <= 0 || view.height <= 0) null
+                else {
+                    val point = IntArray(2)
+                    view.getLocationInWindow(point)
+                    Rect(point[0], point[1], point[0] + view.width, point[1] + view.height)
+                }
+            } ?: return JSONObject().put("status", "unavailable")
+                .put("error", "افتح تبويب المتصفح أولاً لالتقاط الصفحة المرئية")
+            val bitmap = Bitmap.createBitmap(bounds.width().coerceAtMost(1440),
+                bounds.height().coerceAtMost(2400), Bitmap.Config.ARGB_8888)
+            try {
+                var rendered = false
+                repeat(3) {
+                    if (rendered) return@repeat
+                    val result = CompletableFuture<Int>()
+                    AndroidPhoneTools.onMain {
+                        try {
+                            PixelCopy.request(activity.window, bounds, bitmap,
+                                { code -> result.complete(code) }, Handler(Looper.getMainLooper()))
+                        } catch (e: Exception) { result.completeExceptionally(e) }
+                    }
+                    val code = runCatching { result.get(5, TimeUnit.SECONDS) }.getOrDefault(PixelCopy.ERROR_UNKNOWN)
+                    if (code == PixelCopy.SUCCESS) {
+                        // Refuse a flat/empty buffer instead of reporting a
+                        // successful capture with no rendered page content.
+                        val first = bitmap.getPixel(0, 0)
+                        var different = 0
+                        val stepX = (bitmap.width / 120).coerceAtLeast(1)
+                        val stepY = (bitmap.height / 120).coerceAtLeast(1)
+                        loop@ for (y in 0 until bitmap.height step stepY) {
+                            for (x in 0 until bitmap.width step stepX) {
+                                if (bitmap.getPixel(x, y) != first && ++different > 30) {
+                                    rendered = true
+                                    break@loop
+                                }
+                            }
+                        }
+                    }
+                    if (!rendered) Thread.sleep(220)
+                }
+                if (!rendered) return JSONObject().put("status", "unavailable")
+                    .put("error", "لم يُرسَم محتوى WebView في لقطة الشاشة؛ لم تُحفَظ صورة فارغة")
+                val output = java.io.ByteArrayOutputStream()
+                require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                ArtifactRepository.saveBinary(context, owner,
+                    args.optString("name", "browser.png"), "image/png",
+                    output.toByteArray()).json().put("status", "verified").put("published", true)
+            } finally {
+                bitmap.recycle()
+            }
         }
         if (action in setOf("click", "type")) {
             val selector = JSONObject.quote(args.getString("selector")); val text = JSONObject.quote(args.optString("text", ""))
