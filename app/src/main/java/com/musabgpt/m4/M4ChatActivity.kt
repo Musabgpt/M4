@@ -35,9 +35,10 @@ class M4ChatActivity : ComponentActivity() {
             withContext(Dispatchers.IO) { com.musabgpt.m4.scheduler.TaskScheduler.event(this@M4ChatActivity, "app_started", processEventId) }
         }
         setContent {
-            ChatTheme {
+            com.musabgpt.m4.runtime.WorkbenchTheme {
                 val vm: ChatViewModel = viewModel()
                 val terminal = vm.terminal
+                val editorState = remember { com.musabgpt.m4.runtime.WorkspaceEditorState() }
                 val permissionRequest by com.musabgpt.m4.runtime.HostPermissionRequest.pending.collectAsState()
                 val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> com.musabgpt.m4.runtime.HostPermissionRequest.resolve(granted) }
                 LaunchedEffect(permissionRequest) { permissionRequest?.let { permissionLauncher.launch(it) } }
@@ -70,32 +71,26 @@ class M4ChatActivity : ComponentActivity() {
                         delay(1500)
                     }
                 }
-                Column(Modifier.fillMaxSize().navigationBarsPadding()) {
-                    Box(Modifier.weight(1f)) {
+                com.musabgpt.m4.runtime.WorkbenchShell(panel, { panel = it }) {
+                    Box(Modifier.fillMaxSize()) {
                         BrowserPanel(browser)
                         if (panel != "browser") Surface(Modifier.fillMaxSize()) { when (panel) {
-                        "cursor" -> com.musabgpt.m4.runtime.CursorPanel(vm) { panel = it }
+                        "cursor" -> com.musabgpt.m4.runtime.FilesPanel(editorState)
                         "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
                                 runAgent = { goal -> vm.send(goal) },
                                 readAgentProgress = { AgentProgressStore.read(this@M4ChatActivity) },
                                 artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, loadOlderEvents = { eventLimit = (eventLimit + 200).coerceAtMost(5000) }, vm = vm)
                             "terminal" -> TerminalPanel(terminal)
                             "termux" -> TermuxPanel(owner)
-                            "files" -> FilesPanel()
+                            "files" -> FilesPanel(editorState)
                             "tasks" -> SchedulerPanel(owner)
                             "github" -> com.musabgpt.m4.github.GitHubPanel(owner)
                             "gitlab" -> com.musabgpt.m4.github.GitLabPanel(owner)
-                            "tools" -> com.musabgpt.m4.runtime.ToolsPanel(vm, { panel = "chat" }, { panel = "termux" })
+                            "tools" -> com.musabgpt.m4.runtime.ExtensionsPanel { panel = it }
+                            "tool-settings" -> com.musabgpt.m4.runtime.ToolsPanel(vm, { panel = "chat" }, { panel = "termux" })
                         } }
                     }
-                    HorizontalDivider()
-                    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        listOf("cursor" to "Cursor", "chat" to "محادثة", "terminal" to "طرفية", "termux" to "Termux", "files" to "ملفات", "tasks" to "مهام", "browser" to "متصفح", "github" to "GitHub", "gitlab" to "GitLab", "tools" to "إضافات").forEach { (key, label) ->
-                            TextButton(onClick = { panel = key; if (key == "terminal") terminal.open() }) {
-                                Text((if (panel == key) "● " else "") + label)
-                            }
-                        }
-                    }
+
                 }
             }
         }
