@@ -47,7 +47,9 @@ object TermuxClient {
         val executable = args.getString("executable")
         require(executable.matches(Regex("[a-zA-Z][a-zA-Z0-9_.-]{0,80}"))) { "اسم برنامج Termux غير صالح" }
         val arguments = args.optJSONArray("arguments") ?: org.json.JSONArray()
-        require(arguments.length() <= 50 && arguments.toString().length <= 12000)
+        // An embedded, reviewed Python worker is ~9 KB and user prompts may be
+        // longer. Keep the payload well below Android's Binder limit.
+        require(arguments.length() <= 50 && arguments.toString().length <= 180000)
         val cwd = args.optString("cwd", "/data/data/com.termux/files/home")
         require(cwd.startsWith("/data/data/com.termux/files/") && !cwd.split('/').contains(".."))
         if (!preapproved && !CapabilityBroker.request(owner, "تشغيل داخل Termux", args))
@@ -59,7 +61,14 @@ object TermuxClient {
         }
         val id = UUID.randomUUID().toString(); val nonce = UUID.randomUUID().toString()
         val folder = File(directory(context), id).apply { mkdirs() }
-        File(folder, "request.json").writeText(JSONObject().put("owner", owner).put("nonce", nonce).put("command", args).toString())
+        // Receipts need ownership and nonce, not a durable plaintext copy of
+        // user prompts or shell arguments.
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(args.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        File(folder, "request.json").writeText(JSONObject()
+            .put("owner", owner).put("nonce", nonce)
+            .put("command_sha256", digest).toString())
         val callback = Intent(context, TermuxResultReceiver::class.java).setData(Uri.parse("m4-termux://result/$id/$nonce"))
         val pending = PendingIntent.getBroadcast(context, id.hashCode(), callback, PendingIntent.FLAG_ONE_SHOT or
             (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0))
