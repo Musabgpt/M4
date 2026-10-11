@@ -9,6 +9,7 @@ import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import com.musabgpt.m4.runtime.CapabilityBroker
+import com.musabgpt.m4.artifacts.ArtifactRepository
 
 /**
  * Reuses the authenticated NewAl Code agent already running in Termux.
@@ -306,10 +307,32 @@ print(json.dumps({'status':'succeeded','content':answer,
             return JSONObject().put("status", "failed")
                 .put("content", "نتيجة Termux طويلة جداً؛ لم أعتبرها نجاحاً. افتح فحص المحرك.")
         val stdout = receipt.optString("stdout").trim()
-        return runCatching { JSONObject(stdout.substringAfterLast('\n')) }.getOrElse {
-            JSONObject().put("status", "failed")
+        val row = runCatching { JSONObject(stdout.substringAfterLast('\n')) }.getOrElse {
+            return JSONObject().put("status", "failed")
                 .put("content", "المحرك لم يُرجع نتيجة يمكن قراءتها. افتح فحص Termux بدلاً من عرض تفاصيل Python.")
         }
+        if (row.optString("status") == "succeeded") {
+            val files = row.optJSONArray("files")
+            val attachments = JSONArray()
+            for (index in 0 until minOf(2, files?.length() ?: 0)) {
+                val item = files?.optJSONObject(index) ?: continue
+                val name = item.optString("name")
+                if (!name.matches(Regex("[\\p{L}\\p{N}_. -]{1,120}")) ||
+                    name.startsWith(".") || name.contains(Regex("(?i)secret|token|passwd|credential|key")))
+                    continue
+                val saved = runCatching {
+                    val bytes = Base64.decode(item.getString("content_b64"), Base64.NO_WRAP)
+                    require(bytes.size in 1..14000)
+                    val text = bytes.toString(Charsets.UTF_8)
+                    require(text.toByteArray(Charsets.UTF_8).contentEquals(bytes))
+                    ArtifactRepository.saveText(context, owner, name, text)
+                }.getOrNull()
+                if (saved != null) attachments.put(saved.json())
+            }
+            row.put("artifacts", attachments)
+            row.remove("files")
+        }
+        return row
     }
     // Technical stderr stays private in TermuxClient.result.json; chat receives
     // a task-specific human sentence instead of a Python traceback.
