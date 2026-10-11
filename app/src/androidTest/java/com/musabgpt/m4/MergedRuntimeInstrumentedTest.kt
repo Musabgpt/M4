@@ -91,6 +91,32 @@ class MergedRuntimeInstrumentedTest {
         }
     }
 
+    @Test fun terminalInputFieldReallyExecutesShellFromInsideChat() {
+        lateinit var vm: ChatViewModel
+        activity.runOnIdle {
+            vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
+        }
+        activity.onNodeWithTag("chat-plus").performClick()
+        activity.onNodeWithTag("chat-terminal-toggle").performClick()
+        activity.waitUntil(90000) {
+            val state = vm.terminal.state.value
+            !state.preparing && state.selected?.isLinux == true && !state.selected!!.isFinished
+        }
+        val suffix = UUID.randomUUID().toString().take(8)
+        val expected = "M4_UI_INPUT_" + suffix
+        activity.onNodeWithTag("terminal-command-input").performTextInput(
+            "printf '%s%s' 'M4_UI_INPUT_' '" + suffix + "'"
+        )
+        activity.onNodeWithTag("terminal-command-send").performClick()
+        activity.waitUntil(45000) {
+            vm.terminal.state.value.frame?.text?.contains(expected) == true
+        }
+        evidence("terminal-ui-input.json", JSONObject()
+            .put("verified", expected)
+            .put("entrypoint", "Compose TextField -> native PTY -> Alpine shell")
+            .toString(2))
+    }
+
     @Test fun interactiveAlpinePtyActuallyExecutesShellCommands() {
         lateinit var vm: ChatViewModel
         activity.runOnIdle {
