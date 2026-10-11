@@ -20,6 +20,7 @@ import com.musabgpt.m4.runtime.RuntimeEvent
 import com.musabgpt.m4.scheduler.SchedulerPanel
 import com.musabgpt.m4.terminal.EmbeddedAlpineBackend
 import com.musabgpt.m4.terminal.TerminalPanel
+import com.musabgpt.m4.terminal.TermuxPanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -73,20 +74,23 @@ class M4ChatActivity : ComponentActivity() {
                     Box(Modifier.weight(1f)) {
                         BrowserPanel(browser)
                         if (panel != "browser") Surface(Modifier.fillMaxSize()) { when (panel) {
-                            "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
+                        "cursor" -> com.musabgpt.m4.runtime.CursorPanel(vm) { panel = it }
+                        "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
                                 runAgent = { goal -> vm.send(goal) },
                                 readAgentProgress = { AgentProgressStore.read(this@M4ChatActivity) },
                                 artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, loadOlderEvents = { eventLimit = (eventLimit + 200).coerceAtMost(5000) }, vm = vm)
                             "terminal" -> TerminalPanel(terminal)
+                            "termux" -> TermuxPanel(owner)
                             "files" -> FilesPanel()
                             "tasks" -> SchedulerPanel(owner)
                             "github" -> com.musabgpt.m4.github.GitHubPanel(owner)
-                            "tools" -> com.musabgpt.m4.runtime.ToolsPanel(vm) { panel = "chat" }
+                            "gitlab" -> com.musabgpt.m4.github.GitLabPanel(owner)
+                            "tools" -> com.musabgpt.m4.runtime.ToolsPanel(vm, { panel = "chat" }, { panel = "termux" })
                         } }
                     }
                     HorizontalDivider()
                     Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        listOf("chat" to "محادثة", "terminal" to "طرفية", "files" to "ملفات", "tasks" to "مهام", "browser" to "متصفح", "github" to "GitHub", "tools" to "أدوات").forEach { (key, label) ->
+                        listOf("cursor" to "Cursor", "chat" to "محادثة", "terminal" to "طرفية", "termux" to "Termux", "files" to "ملفات", "tasks" to "مهام", "browser" to "متصفح", "github" to "GitHub", "gitlab" to "GitLab", "tools" to "إضافات").forEach { (key, label) ->
                             TextButton(onClick = { panel = key; if (key == "terminal") terminal.open() }) {
                                 Text((if (panel == key) "● " else "") + label)
                             }

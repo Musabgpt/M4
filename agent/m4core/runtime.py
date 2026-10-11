@@ -276,6 +276,24 @@ class ToolRuntime:
                 self.registry.metadata[name].update(capabilities=["github"], risk_level="publish" if mutation else "read", requires_user_consent=mutation)
             self._add("GitPush", "Upload a committed patch to a new work branch via the native GitHub client, with conflict checks and approval.",
                 self.git_push, {"repository": S, "message": S}, ("repository", "message"))
+        if self.capabilities.get("gitlab_client"):
+            gitlab = {
+                "GitLabStatus": ("status", {}, ()),
+                "GitLabProjects": ("projects", {}, ()),
+                "GitLabProject": ("project", {"project": S}, ("project",)),
+                "GitLabIssues": ("issues", {"project": S}, ("project",)),
+                "GitLabMergeRequests": ("merge_requests", {"project": S}, ("project",)),
+                "GitLabPipelines": ("pipelines", {"project": S}, ("project",)),
+                "GitLabPipeline": ("pipeline", {"project": S, "id": schema("integer", minimum=1)}, ("project", "id")),
+                "GitLabCreateIssue": ("create_issue", {"project": S, "title": S, "description": S}, ("project", "title")),
+                "GitLabCreateMergeRequest": ("create_merge_request", {"project": S, "source_branch": S, "target_branch": S, "title": S, "description": S}, ("project", "source_branch", "title")),
+                "GitLabTriggerPipeline": ("trigger_pipeline", {"project": S, "ref": S}, ("project", "ref")),
+            }
+            for name, (action, properties, required) in gitlab.items():
+                mutation = action in {"create_issue", "create_merge_request", "trigger_pipeline"}
+                self._add(name, "Native GitLab " + action + "; token remains in Android Keystore.",
+                          lambda a, action=action, mutation=mutation: self.android_action("gitlab", dict(a, action=action), mutation), properties, required)
+                self.registry.metadata[name].update(capabilities=["gitlab"], risk_level="publish" if mutation else "read", requires_user_consent=mutation)
 
     @classmethod
     def describe(cls):

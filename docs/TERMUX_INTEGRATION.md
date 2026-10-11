@@ -1,12 +1,17 @@
-# Optional Termux status
+# Optional Termux connector
 
-Embedded Alpine/PRoot/PT​Y remains the only implemented terminal backend.
-Termux RUN_COMMAND and Termux:API are not registered or advertised as available.
-They require a compatible installed app, its official permission and external
-command configuration, and a verified result adapter. This environment has no
-Android device on which to discover those prerequisites. No new Termux permission
-or shared-storage access was added. Missing Termux does not affect Alpine.
+The embedded Alpine/PRoot/PTY terminal is M4's default execution surface.
+Termux is an optional Cursor workbench connector, opened from one button when a
+user needs the separate Termux environment. M4 does not depend on it.
 
-The next optional connector must label official background results as batch
-output unless it can independently prove streaming/interactive support. Android
-UID isolation is not bypassed and private paths are not shared across apps.
+`TermuxClient` sends commands through the official `com.termux.RUN_COMMAND`
+service and waits for the documented PendingIntent callback. Each command has a
+bounded Termux working directory, explicit capability approval, a timeout, and
+a durable receipt containing stdout, stderr and exit code. A dispatch without a
+callback is reported as `pending_result`, never as success. The result is also
+saved as a chat report artifact.
+
+The device must have Termux installed, grant `com.termux.permission.RUN_COMMAND`
+when requested, and enable `allow-external-apps=true` in Termux. Missing or
+blocked Termux only disables this optional connector; it never changes the
+embedded terminal. Android UID isolation and private app paths are preserved.

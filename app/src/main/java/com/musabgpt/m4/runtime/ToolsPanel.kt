@@ -17,7 +17,7 @@ import io.musab.arabicterminal.UiControlService
 import org.json.JSONArray
 import org.json.JSONObject
 
-@Composable fun ToolsPanel(vm: ChatViewModel, showChat: () -> Unit) {
+@Composable fun ToolsPanel(vm: ChatViewModel, showChat: () -> Unit, openTermux: () -> Unit = {}) {
     val context = LocalContext.current
     var executable by remember { mutableStateOf("python") }
     var arguments by remember { mutableStateOf("[\"--version\"]") }
@@ -30,8 +30,9 @@ import org.json.JSONObject
         Text("التحكم بالهاتف: " + if (UiControlService.current() != null) "الخدمة مفعلة" else "غير مفعل")
         TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text("إعدادات التحكم بالهاتف") }
         Row { TextButton(onClick = { command("/phone apps") }) { Text("التطبيقات المثبتة") }; TextButton(onClick = { command("/phone screen") }) { Text("قراءة الشاشة") } }
-        Text("Termux (اختياري)", style = MaterialTheme.typography.titleMedium)
+        Text("Termux (إضافة اختيارية)", style = MaterialTheme.typography.titleMedium)
         Text(TermuxClient.status(context).toString())
+        TextButton(onClick = openTermux) { Text("فتح لوحة Termux") }
         OutlinedTextField(executable, { executable = it }, label = { Text("اسم البرنامج") })
         OutlinedTextField(arguments, { arguments = it }, label = { Text("وسائط البرنامج كـ JSON array") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = { try { command("/termux run " + JSONObject().put("executable", executable).put("arguments", JSONArray(arguments)).toString()) } catch (e: Exception) { error = e.message.orEmpty() } }) { Text("مراجعة أمر Termux وتشغيله") }

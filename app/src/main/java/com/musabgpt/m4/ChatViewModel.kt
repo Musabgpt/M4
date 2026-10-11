@@ -211,7 +211,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String) {
         val clean = text.trim()
         if (clean.isEmpty() || _streaming.value) return
-        if (clean in setOf("/terminal", "/phone", "/browser", "/github", "/tasks", "/termux", "/schedule")) { _requestedPanel.value = when(clean) { "/schedule" -> "tasks"; "/termux" -> "tools"; "/phone" -> "tools"; else -> clean.drop(1) }; return }
+        if (clean in setOf("/cursor", "/terminal", "/phone", "/browser", "/github", "/gitlab", "/tasks", "/termux", "/schedule")) { _requestedPanel.value = when(clean) { "/cursor" -> "cursor"; "/schedule" -> "tasks"; "/termux" -> "termux"; "/phone" -> "tools"; else -> clean.drop(1) }; return }
         if (clean == "/export") { exportChat(); return }
         if (clean == "/compact") {
             edit(_currentId.value) { c -> if (c.messages.size <= 20) c else c.copy(messages = listOf(c.messages.first(), UiMessage(role = "assistant", content = "سياق مضغوط: الهدف الأصلي أعلاه؛ حُذفت ${c.messages.size - 17} رسالة من سياق النموذج. المرفقات وسجل الأدوات باقية.\n" + c.messages.filter { it.role == "user" }.takeLast(4).joinToString("\n") { it.content.take(500) })) + c.messages.takeLast(16)) }

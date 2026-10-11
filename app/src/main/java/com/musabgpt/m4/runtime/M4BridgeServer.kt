@@ -75,6 +75,7 @@ class M4BridgeServer(private val context: Context) : Closeable {
                 "phone" -> arguments.optString("action") in setOf("list_apps", "device", "battery", "screen", "wait_for", "assert_visible")
                 "browser" -> arguments.optString("action") in setOf("read_dom", "wait_for", "assert_visible", "console", "network")
                 "github" -> arguments.optString("action") in setOf("status", "check_connection", "repositories", "runs", "run", "jobs", "job_logs", "artifacts", "pull_requests", "pull_request", "update_status")
+                "gitlab" -> arguments.optString("action") in setOf("status", "projects", "project", "issues", "merge_requests", "pipelines", "pipeline")
                 "schedule" -> arguments.optString("action") in setOf("list", "logs")
                 else -> false
             }) { "Plan mode is read-only in the native host" }
@@ -85,6 +86,7 @@ class M4BridgeServer(private val context: Context) : Closeable {
                     .put("permission_broker", true).put("sdk", android.os.Build.VERSION.SDK_INT)
                     .put("browser", com.musabgpt.m4.browser.BrowserController.current != null).put("termux", com.musabgpt.m4.terminal.TermuxClient.status(context))
                     .put("github_client", true).put("github", com.musabgpt.m4.github.GitHubClient(context).status())
+                    .put("gitlab_client", true).put("gitlab", com.musabgpt.m4.github.GitLabClient(context).status())
                 "artifact_pdf" -> ArtifactRepository.createPdf(context, arguments)
                 "artifact_inspect" -> ArtifactRepository.inspect(context, owner, arguments.getString("id"))
                 "artifact_view" -> ArtifactRepository.view(context, owner, arguments.getString("id"))
@@ -96,6 +98,7 @@ class M4BridgeServer(private val context: Context) : Closeable {
                 "browser" -> (com.musabgpt.m4.browser.BrowserController.current ?: error("المتصفح غير متاح؛ افتح M4"))
                     .call(arguments.getString("action"), arguments, owner)
                 "github" -> com.musabgpt.m4.github.GitHubClient(context).call(arguments.getString("action"), arguments, owner)
+                "gitlab" -> com.musabgpt.m4.github.GitLabClient(context).call(arguments.getString("action"), arguments, owner)
                 "phone_test" -> com.musabgpt.m4.phone.PhoneTestLab.run(context, arguments, owner, turn)
                 "browser_test" -> com.musabgpt.m4.browser.BrowserTestLab.run(context, arguments, owner)
                 "approve" -> JSONObject().put("approved", CapabilityBroker.request(owner, arguments.getString("tool"), arguments.getJSONObject("arguments")))

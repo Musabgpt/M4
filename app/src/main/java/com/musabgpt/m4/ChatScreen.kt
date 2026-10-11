@@ -318,7 +318,7 @@ fun ChatScreen(
                         pendingAttachments.forEach { attachment -> AssistChip(onClick = { vm.removeAttachment(attachment.id) }, label = { Text("${attachment.name} ×") }) }
                     }
                     if (input.startsWith("/") && !input.contains(' ')) Row(Modifier.horizontalScroll(rememberScrollState())) {
-                        listOf("/tools", "/skills", "/mcp", "/agents", "/hooks", "/terminal", "/termux", "/phone", "/browser", "/artifacts", "/export", "/schedule", "/tasks", "/doctor", "/selftest", "/github", "/permissions", "/rewind", "/cost", "/compact", "/memory", "/init", "/git", "/model", "/status").filter { it.startsWith(input) }.take(12).forEach { suggestion -> TextButton(onClick = { input = suggestion + " " }) { Text(suggestion) } }
+                        listOf("/cursor", "/tools", "/skills", "/mcp", "/agents", "/hooks", "/terminal", "/termux", "/phone", "/browser", "/artifacts", "/export", "/schedule", "/tasks", "/doctor", "/selftest", "/github", "/gitlab", "/permissions", "/rewind", "/cost", "/compact", "/memory", "/init", "/git", "/model", "/status").filter { it.startsWith(input) }.take(12).forEach { suggestion -> TextButton(onClick = { input = suggestion + " " }) { Text(suggestion) } }
                     }
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 15.dp),

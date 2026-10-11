@@ -3,7 +3,7 @@ import json
 import shlex
 from .provider_health import ProviderHealth
 
-COMMANDS = ("tools", "skills", "mcp", "agents", "hooks", "terminal", "termux", "phone", "browser", "artifacts", "export", "schedule", "tasks", "task", "doctor", "selftest", "github", "plan", "permissions", "rewind", "cost", "compact", "memory", "init", "git", "model", "status")
+COMMANDS = ("cursor", "tools", "skills", "mcp", "agents", "hooks", "terminal", "termux", "phone", "browser", "artifacts", "export", "schedule", "tasks", "task", "doctor", "selftest", "github", "gitlab", "plan", "permissions", "rewind", "cost", "compact", "memory", "init", "git", "model", "status")
 def dispatch(runtime, text):
     words = shlex.split(text); name = words[0].lstrip("/"); rest = words[1:]
     def call(tool, arguments=None):
