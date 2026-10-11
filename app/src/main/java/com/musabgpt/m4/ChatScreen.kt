@@ -370,7 +370,7 @@ fun ChatScreen(
                         }
                     }
                     if (terminalExpanded) {
-                        Surface(color = colors.surfaceVariant, modifier = Modifier.fillMaxWidth().height(275.dp)) {
+                        Surface(color = colors.surfaceVariant, modifier = Modifier.fillMaxWidth().height(275.dp).testTag("inline-terminal")) {
                             TerminalPanel(vm.terminal)
                         }
                     }
