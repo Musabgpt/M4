@@ -15,7 +15,7 @@ import java.security.MessageDigest
 /** Bounded observations and user-consented actions through the real service. */
 object PhoneAccessibilityTools {
     private fun missing() = JSONObject().put("status", "permission_required").put("needs", "accessibility")
-        .put("error", "فعّل خدمة «تحكم الطرفية العربية» من إعدادات إمكانية الوصول")
+        .put("error", "فعّل خدمة «M4 • التحكم بالهاتف» من إعدادات إمكانية الوصول")
 
     fun observe(): JSONObject = AndroidPhoneTools.onMain {
         val service = UiControlService.current() ?: return@onMain missing()
