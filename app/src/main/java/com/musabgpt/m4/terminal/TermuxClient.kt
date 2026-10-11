@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import com.musabgpt.m4.runtime.CapabilityBroker
 import com.musabgpt.m4.runtime.HostPermissionRequest
-import com.musabgpt.m4.artifacts.ArtifactRepository
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -52,7 +51,25 @@ object TermuxClient {
         require(arguments.length() <= 50 && arguments.toString().length <= 180000)
         val cwd = args.optString("cwd", "/data/data/com.termux/files/home")
         require(cwd.startsWith("/data/data/com.termux/files/") && !cwd.split('/').contains(".."))
-        if (!preapproved && !CapabilityBroker.request(owner, "تشغيل داخل Termux", args))
+        // Never dump the multi-page internal Python bridge (including the
+        // user's base64 prompt) into the approval dialog. Still bind consent
+        // to a cryptographic digest of the EXACT command and arguments.
+        val fullCommandHash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(args.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        val approval = JSONObject()
+            .put("program", executable)
+            .put("sha256", fullCommandHash)
+            .put("owner", owner)
+        if (executable == "python" && arguments.length() >= 2 &&
+            arguments.optString(0) == "-c" &&
+            arguments.optString(1).contains("M4_BOOTSTRAP_DOWNLOAD_FAILED")) {
+            approval.put("operation", "تشغيل وتجهيز وكيل NewAl عبر Termux")
+        } else {
+            approval.put("operation", "تنفيذ أمر Termux")
+                .put("arguments_preview", arguments.toString().take(750))
+        }
+        if (!preapproved && !CapabilityBroker.request(owner, "تشغيل داخل Termux", approval))
             return JSONObject().put("status", "denied").put("error", "رفض المستخدم أمر Termux")
         if (context.checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED) {
             if (preapproved || !HostPermissionRequest.request(PERMISSION))
@@ -115,8 +132,8 @@ object TermuxClient {
                 else if (bundle.getInt("exitCode") == 0) "succeeded" else "failed")
             .put("truncated", bundle.getInt("stdout_original_length", 0) > 64000 || bundle.getInt("stderr_original_length", 0) > 64000)
         if (error != android.app.Activity.RESULT_OK) row.put("error", bundle.getString("errmsg", "Termux command rejected").take(1000))
-        val artifact = ArtifactRepository.saveReport(context, request.getString("owner"), "termux-${segments[0]}.md", "# Termux command receipt\n\n```json\n${row.toString(2)}\n```\n")
-        row.put("report_artifact", artifact.json())
+        // The private result.json is the receipt. Do not turn internal
+        // transport failures into visible .md artifacts inside the chat.
         val temporary = File(folder, ".result.tmp"); temporary.writeText(row.toString()); require(temporary.renameTo(File(folder, "result.json")))
     }
 }

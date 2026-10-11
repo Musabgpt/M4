@@ -24,6 +24,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onAllNodesWithText
 
 @RunWith(AndroidJUnit4::class)
@@ -34,6 +35,52 @@ class MergedRuntimeInstrumentedTest {
     private fun evidence(name: String, text: String) {
         File(context.filesDir, "qa").apply { mkdirs() }.resolve(name).writeText(text)
         android.util.Log.i("M4QAReceipt", name + " " + text.take(3500))
+    }
+
+    @Test fun firstUseSetupAvailableWithoutExternalPairingWizard() {
+        activity.onNodeWithTag("chat-plus").performClick()
+        activity.onNodeWithText("Termux — أوامر حقيقية").assertExists()
+        activity.onNodeWithTag("chat-terminal-toggle").performClick()
+        activity.onNodeWithText("تجهيز وكيل NewAl تلقائياً").assertExists()
+        activity.onNodeWithText("Termux — محرك M4").assertExists()
+    }
+
+    @Test fun doctorUsesRealNewlinesInsteadOfEscapedJson() {
+        lateinit var vm: ChatViewModel
+        activity.runOnIdle {
+            vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
+            vm.newChat()
+            vm.send("/doctor")
+        }
+        val text = vm.conversations.value.first { it.id == vm.currentId.value }.messages.last().content
+        assertTrue("Real line breaks expected: " + text, text.contains("\nصلاحية RUN_COMMAND:"))
+        assertFalse("Escaped JSON delimiters must be invisible", text.contains("\\n"))
+    }
+
+    @Test fun legacyTermuxDebugReceiptsAreNotChatFiles() {
+        val id = UUID.randomUUID().toString()
+        val report = ArtifactRepository.saveReport(context, owner, "termux-" + id + ".md",
+            "transport diagnostic, not a user file")
+        val keep = ArtifactRepository.saveText(context, owner, "my-project.md", "user project")
+        try {
+            val visible = ArtifactRepository.list(context, owner)
+            assertFalse("Internal Termux receipt leaked into conversation",
+                visible.any { it.id == report.id })
+            assertTrue("User files must remain visible",
+                visible.any { it.id == keep.id })
+        } finally {
+            File(context.filesDir, "artifacts/" + report.id).deleteRecursively()
+            File(context.filesDir, "artifacts/" + keep.id).deleteRecursively()
+        }
+    }
+
+    @Test fun whatsappCompositeSearchMustNotRouteToModel() {
+        val recognized = com.musabgpt.m4.phone.LocalAppSearch.parse(
+            "افتح واتساب وابحث عن مسلسل باب الحارة"
+        )
+        assertNotNull("Explicit WhatsApp search must be handled locally", recognized)
+        assertEquals("com.whatsapp", recognized!!.app)
+        assertEquals("مسلسل باب الحارة", recognized.query)
     }
 
     @Test fun githubRepositoryBrowserIsActuallyReachableFromChatHeader() {
@@ -92,10 +139,11 @@ class MergedRuntimeInstrumentedTest {
         activity.onNodeWithTag("chat-plus").performClick()
         activity.onNodeWithTag("chat-terminal-toggle").performClick()
         activity.onNodeWithText("Termux — محرك M4").assertExists()
-        activity.onNodeWithText("نفّذ في Termux").performClick()
-        activity.waitUntil(25000) {
-            activity.onAllNodesWithText("Termux غير مثبت", substring = true).fetchSemanticsNodes().isNotEmpty()
-        }
+        // When Termux is absent, the UI must not expose an executable action.
+        activity.onNodeWithText("نفّذ داخل Termux").assertExists()
+        activity.onNodeWithText("نفّذ داخل Termux").assertIsNotEnabled()
+        activity.onNodeWithText("تجهيز وكيل NewAl تلقائياً").assertIsNotEnabled()
+        activity.onNodeWithText("الحالة: Termux غير مثبت").assertExists()
     }
 
     @Test fun removedArabicTerminalCannotBeLaunchedOrOverlaid() {
