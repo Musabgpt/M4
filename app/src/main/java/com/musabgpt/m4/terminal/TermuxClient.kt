@@ -51,7 +51,25 @@ object TermuxClient {
         require(arguments.length() <= 50 && arguments.toString().length <= 180000)
         val cwd = args.optString("cwd", "/data/data/com.termux/files/home")
         require(cwd.startsWith("/data/data/com.termux/files/") && !cwd.split('/').contains(".."))
-        if (!preapproved && !CapabilityBroker.request(owner, "تشغيل داخل Termux", args))
+        // Never dump the multi-page internal Python bridge (including the
+        // user's base64 prompt) into the approval dialog. Still bind consent
+        // to a cryptographic digest of the EXACT command and arguments.
+        val fullCommandHash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(args.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        val approval = JSONObject()
+            .put("program", executable)
+            .put("sha256", fullCommandHash)
+            .put("owner", owner)
+        if (executable == "python" && arguments.length() >= 2 &&
+            arguments.optString(0) == "-c" &&
+            arguments.optString(1).contains("M4_BOOTSTRAP_DOWNLOAD_FAILED")) {
+            approval.put("operation", "تشغيل وتجهيز وكيل NewAl عبر Termux")
+        } else {
+            approval.put("operation", "تنفيذ أمر Termux")
+                .put("arguments_preview", arguments.toString().take(750))
+        }
+        if (!preapproved && !CapabilityBroker.request(owner, "تشغيل داخل Termux", approval))
             return JSONObject().put("status", "denied").put("error", "رفض المستخدم أمر Termux")
         if (context.checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED) {
             if (preapproved || !HostPermissionRequest.request(PERMISSION))
