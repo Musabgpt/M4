@@ -100,7 +100,7 @@ object TermuxClient {
             .put("status", if (error != android.app.Activity.RESULT_OK || !hasExit) "blocked"
                 else if (bundle.getInt("exitCode") == 0) "succeeded" else "failed")
             .put("truncated", bundle.getInt("stdout_original_length", 0) > 64000 || bundle.getInt("stderr_original_length", 0) > 64000)
-        if (error != 0) row.put("error", bundle.getString("errmsg", "Termux command rejected").take(1000))
+        if (error != android.app.Activity.RESULT_OK) row.put("error", bundle.getString("errmsg", "Termux command rejected").take(1000))
         val artifact = ArtifactRepository.saveReport(context, request.getString("owner"), "termux-${segments[0]}.md", "# Termux command receipt\n\n```json\n${row.toString(2)}\n```\n")
         row.put("report_artifact", artifact.json())
         val temporary = File(folder, ".result.tmp"); temporary.writeText(row.toString()); require(temporary.renameTo(File(folder, "result.json")))
