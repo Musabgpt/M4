@@ -23,6 +23,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
+import android.util.Log
 
 @RunWith(AndroidJUnit4::class)
 class MergedRuntimeInstrumentedTest {
@@ -61,7 +62,16 @@ class MergedRuntimeInstrumentedTest {
         try {
             activity.onNodeWithTag("chat-input").performTextInput("مرحبا")
             activity.onNodeWithTag("chat-send").performClick()
-            activity.waitUntil(180000) { !vm.streaming.value && vm.conversations.value.first { it.id == vm.currentId.value }.messages.any { it.role == "assistant" } }
+            try {
+                activity.waitUntil(180000) { !vm.streaming.value && vm.conversations.value.first { it.id == vm.currentId.value }.messages.any { it.role == "assistant" } }
+            } catch (failure: Throwable) {
+                val root = LinuxEnvironment.rootfs(context)
+                val turn = vm.conversations.value.first { it.id == vm.currentId.value }.messages.last { it.role == "assistant" }.turnId
+                val folder = File(root, "root/.m4/chats/${vm.currentId.value}/$turn")
+                val events = File(root, "root/projects/M4/.term-agent/events.jsonl")
+                Log.e("M4QA", "timeout streaming=${vm.streaming.value} status=${vm.terminal.state.value.status} frame=${vm.terminal.state.value.frame?.text?.takeLast(3000)} request=${File(folder, "request.json").isFile} response=${File(folder, "response.json").isFile} events=${events.length()}", failure)
+                throw failure
+            }
             val messages = vm.conversations.value.first { it.id == vm.currentId.value }.messages
             val reply = messages.last { it.role == "assistant" }.content
             evidence("first-message.json", JSONObject().put("reply", reply).put("runtime", vm.terminal.state.value.status).put("model_request_received", received.get() != null).toString(2))
