@@ -120,6 +120,64 @@ class MergedRuntimeInstrumentedTest {
         assertFalse(reply.contains("No available gateway"))
         assertFalse(reply.contains("provider_fallback"))
     }
+    @Test fun termuxPendingIntentContractAcceptsActualResultOkMinusOne() {
+        val commandId = UUID.randomUUID().toString()
+        val nonce = UUID.randomUUID().toString()
+        val folder = File(context.filesDir, "termux-results/" + commandId).apply { mkdirs() }
+        File(folder, "request.json").writeText(
+            JSONObject().put("owner", owner).put("nonce", nonce)
+                .put("command", JSONObject().put("executable", "python")).toString()
+        )
+        try {
+            val result = android.os.Bundle().apply {
+                putInt("err", android.app.Activity.RESULT_OK)
+                putInt("exitCode", 0)
+                putString("stdout", "M4_TERMUX_OK")
+                putString("stderr", "")
+            }
+            val incoming = android.content.Intent(context,
+                com.musabgpt.m4.terminal.TermuxResultReceiver::class.java)
+                .setData(android.net.Uri.parse("m4-termux://result/$commandId/$nonce"))
+                .putExtra("result", result)
+            com.musabgpt.m4.terminal.TermuxClient.receive(context, incoming)
+            val receipt = com.musabgpt.m4.terminal.TermuxClient.output(context, owner, commandId)
+            assertEquals("succeeded", receipt.getString("status"))
+            assertEquals(0, receipt.getInt("exit_code"))
+            assertEquals("M4_TERMUX_OK", receipt.getString("stdout"))
+        } finally {
+            folder.deleteRecursively()
+        }
+    }
+
+    @Test fun termuxPendingIntentMustRejectMissingOrErroneousReturnCode() {
+        listOf(0, 17).forEach { badErr ->
+            val commandId = UUID.randomUUID().toString()
+            val nonce = UUID.randomUUID().toString()
+            val folder = File(context.filesDir, "termux-results/" + commandId).apply { mkdirs() }
+            File(folder, "request.json").writeText(JSONObject()
+                .put("owner", owner).put("nonce", nonce).put("command", JSONObject()).toString())
+            try {
+                val result = android.os.Bundle().apply {
+                    putInt("err", badErr)
+                    putInt("exitCode", 0)
+                    putString("stdout", "UNTRUSTWORTHY")
+                }
+                com.musabgpt.m4.terminal.TermuxClient.receive(
+                    context,
+                    android.content.Intent(context,
+                        com.musabgpt.m4.terminal.TermuxResultReceiver::class.java)
+                        .setData(android.net.Uri.parse("m4-termux://result/$commandId/$nonce"))
+                        .putExtra("result", result)
+                )
+                assertEquals("blocked",
+                    com.musabgpt.m4.terminal.TermuxClient.output(context, owner, commandId)
+                        .getString("status"))
+            } finally {
+                folder.deleteRecursively()
+            }
+        }
+    }
+
     @Test fun youtubeCompositeIntentParsesWithoutLlmOrToolGateway() {
         val item = com.musabgpt.m4.phone.YouTubeActions.parse(
             "افتح يوتيوب وابحث عن مسلسل باب الحارة وشغلي الفيديو"
