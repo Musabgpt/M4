@@ -195,7 +195,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
         activeTurn = turn
         val guestDirectory = "/root/.m4/chats/$owner/$turn"
         Log.e("M4Runtime", "sending agent command family=$family path=$guestDirectory")
-        current.write(session, "M4_AGENT_PROVIDER_FILE=${quote("$guestDirectory/provider.env")} m4-agent-start --chat ${quote("$guestDirectory/request.json")}\n")
+        current.write(session, "exec M4_AGENT_PROVIDER_FILE=${quote("$guestDirectory/provider.env")} m4-agent-start --chat ${quote("$guestDirectory/request.json")}\n")
         var last = 0L
         try {
             return withTimeout(660000) {
@@ -234,7 +234,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
             config.writeText("export M4_GATEWAY_FAMILY=${quote(families[index])}\nexport M4_OWNER_SESSION=${quote(owner)}\nexport M4_PERMISSION_MODE=${quote(mode)}\n")
             config.setReadable(false, false); config.setWritable(false, false)
             config.setReadable(true, true); config.setWritable(true, true)
-            current.write(session, "M4_AGENT_PROVIDER_FILE=${quote("/root/.m4-agent/$configName")} m4-agent-start ${quote(goal)}\n")
+            current.write(session, "exec M4_AGENT_PROVIDER_FILE=${quote("/root/.m4-agent/$configName")} m4-agent-start ${quote(goal)}\n")
         } catch (e: Exception) { failure(e.message) }
     }
 

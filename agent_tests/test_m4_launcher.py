@@ -40,13 +40,16 @@ class M4LauncherTests(unittest.TestCase):
         (self.project / "agent_tests").mkdir()
         (self.project / "agent" / "agent.py").write_text("# agent\n")
 
-    def test_existing_checkout_initializes_real_checks_and_runs_goal(self):
+    def test_existing_checkout_configures_real_checks_and_runs_goal(self):
         self.seed_checkout()
         result = self.invoke("Add tests & fix bug")
         self.assertEqual(result.returncode, 0, result.stderr)
         commands = self.log.read_text()
-        self.assertIn("check-add python3 -m unittest discover -s agent_tests -v", commands)
         self.assertIn("run Add tests & fix bug --steps 40 --allow-exec", commands)
+        self.assertEqual(
+            (self.project / ".term-agent" / "checks.json").read_text(),
+            '["python3 -m unittest discover -s agent_tests -v"]\n',
+        )
         self.assertTrue((self.project / ".git").exists())
 
     def test_offline_seed_creates_editable_checkout(self):

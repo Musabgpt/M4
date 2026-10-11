@@ -47,15 +47,20 @@ if [ ! -f "agent/agent.py" ] || [ ! -d "agent_tests" ]; then
   echo "This directory does not have the expected M4 agent sources." >&2
   exit 6
 fi
-# This checks the real source tree; 'python3 -V' is not a valid project test.
-term-agent init
-term-agent check-add 'python3 -m unittest discover -s agent_tests -v'
 # Only a fixed, harmless gateway family name is sourced here, not API credentials.
 . "$provider"
 case "${M4_GATEWAY_FAMILY:-freellmpool}" in
     freellmpool|gpt4free|free-llm-gateway|free-llm-api) ;;
     *) echo "Unsupported M4 gateway family" >&2; exit 7 ;;
 esac
+# Keep setup in shell builtins: Android's PRoot build can run the existing
+# shell, but fork(2) is unavailable for a child command. Python is replaced
+# with exec below, so no intermediate child is needed for a chat turn.
+mkdir -p "$project/.term-agent"
+checks="$project/.term-agent/checks.json"
+if [ ! -s "$checks" ]; then
+  printf '["python3 -m unittest discover -s agent_tests -v"]\n' > "$checks"
+fi
 echo "Project source: $project"
 echo "Independent Python agent checks configured. Android APK build runs in GitHub CI."
 if [ "${M4_PERMISSION_MODE:-auto_project}" = "plan_only" ]; then
