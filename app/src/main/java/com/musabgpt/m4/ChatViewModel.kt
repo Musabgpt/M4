@@ -106,6 +106,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _conversations.value = _conversations.value.map { if (it.id == id) transform(it) else it }
     }
 
+    fun recordTerminalRequest(text: String) {
+        edit(_currentId.value) { c -> c.copy(messages = c.messages + UiMessage(role = "user", content = text)) }
+        saveHistory()
+    }
+
     fun send(text: String) {
         val clean = text.trim()
         if (clean.isEmpty() || _streaming.value) return

@@ -52,6 +52,7 @@ test -d "$SEED/.git"
 mkdir -p "$STAGING/opt/term-agent" "$STAGING/usr/local/bin"
 cp "$ROOT/agent/agent.py" "$STAGING/opt/term-agent/agent.py"
 cp -R "$ROOT/agent/newal" "$STAGING/opt/term-agent/newal"
+cp -R "$ROOT/agent/m4core" "$STAGING/opt/term-agent/m4core"
 find "$STAGING/opt/term-agent/newal" -type f -name '*.pyc' -delete
 cp "$ROOT/agent/system_prompt.md" "$STAGING/opt/term-agent/system_prompt.md"
 cp "$ROOT/agent/provider_routes.py" "$STAGING/opt/term-agent/provider_routes.py"

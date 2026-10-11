@@ -16,3 +16,6 @@ tests/out/
 keystore.properties
 signing.properties
 release-output/
+__pycache__/
+*.pyc
+.term-agent/

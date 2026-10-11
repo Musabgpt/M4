@@ -49,6 +49,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import com.musabgpt.m4.artifacts.ArtifactChatCard
+import com.musabgpt.m4.artifacts.ChatArtifact
 
 private val Clay = Color(0xFFD97757)
 
@@ -94,6 +96,8 @@ fun ChatScreen(
     openTerminal: () -> Unit,
     runAgent: (String) -> Unit,
     readAgentProgress: () -> AgentProgress?,
+    artifacts: List<ChatArtifact> = emptyList(),
+    executeCommand: (String) -> Unit = {},
     vm: ChatViewModel = viewModel()
 ) {
     val conversations by vm.conversations.collectAsState()
@@ -294,7 +298,10 @@ fun ChatScreen(
                         onTextChange = { input = it },
                         isStreaming = isStreaming,
                         onSend = {
-                            vm.send(input)
+                            if (input.trim().startsWith("!")) {
+                                vm.recordTerminalRequest(input.trim())
+                                executeCommand(input.trim().drop(1))
+                            } else vm.send(input)
                             input = ""
                         },
                         onStop = vm::stop
@@ -302,7 +309,7 @@ fun ChatScreen(
                 }
             }
         ) { padding ->
-            if (current.messages.isEmpty()) {
+            if (current.messages.isEmpty() && artifacts.isEmpty()) {
                 Column(
                     modifier = Modifier.padding(padding).fillMaxSize().padding(32.dp),
                     verticalArrangement = Arrangement.Center,
@@ -325,13 +332,14 @@ fun ChatScreen(
                     )
                 }
             } else {
-                val lastId = current.messages.last().id
+                val lastId = current.messages.lastOrNull()?.id
                 LazyColumn(
                     reverseLayout = true,
                     modifier = Modifier.padding(padding).fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
+                    items(artifacts.reversed(), key = { "artifact-" + it.id }) { artifact -> ArtifactChatCard(artifact) }
                     items(current.messages.reversed(), key = { it.id }) { msg ->
                         MessageRow(
                             msg = msg,

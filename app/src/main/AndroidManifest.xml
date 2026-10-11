@@ -7,7 +7,7 @@
             <category android:name="android.intent.category.LAUNCHER"/>
         </intent>
     </queries>
-    <!-- No INTERNET permission, no ADB and no root required for app launching. -->
+    <!-- Network supports model gateways; launching apps requires neither ADB nor root. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
@@ -27,6 +27,9 @@
             android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"/>
+        <provider android:name="com.musabgpt.m4.artifacts.ArtifactContentProvider"
+            android:authorities="${applicationId}.artifacts" android:exported="false"
+            android:grantUriPermissions="true"/>
         <service android:name=".TerminalService"
             android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
