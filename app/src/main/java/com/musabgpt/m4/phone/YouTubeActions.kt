@@ -3,7 +3,7 @@ package com.musabgpt.m4.phone
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.SearchManager
+import android.app.SearchManager
 import android.view.accessibility.AccessibilityNodeInfo
 import io.musab.arabicterminal.UiControlService
 import org.json.JSONObject
