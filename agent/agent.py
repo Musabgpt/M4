@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 import urllib.parse
 import urllib.request
 import uuid
@@ -407,7 +408,10 @@ def main():
         return loop(root,state,getattr(args,"goal",None),args.steps,args.allow_exec)
     if args.permission_mode == "auto" and not args.allow_exec:
         raise ValueError("Auto mode requires --allow-exec; dangerous Bash still denied")
-    return run_m4core(sys.modules[__name__],root,state,getattr(args,"goal",None),
+    host = SimpleNamespace(load=load, save=save, history=history, log=log,
+                           recent=recent, verify=verify, task_state=task_state,
+                           SYSTEM=SYSTEM, sys=sys)
+    return run_m4core(host,root,state,getattr(args,"goal",None),
                       args.steps,args.allow_exec,args.permission_mode)
 
 if __name__=="__main__":
