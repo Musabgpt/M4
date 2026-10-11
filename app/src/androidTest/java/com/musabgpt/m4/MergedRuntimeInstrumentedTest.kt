@@ -23,6 +23,8 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertExists
+import androidx.compose.ui.test.onNodeWithText
 
 @RunWith(AndroidJUnit4::class)
 class MergedRuntimeInstrumentedTest {
@@ -30,6 +32,13 @@ class MergedRuntimeInstrumentedTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val owner = "qa-" + UUID.randomUUID().toString()
     private fun evidence(name: String, text: String) { File(context.filesDir, "qa").apply { mkdirs() }.resolve(name).writeText(text) }
+
+    @Test fun chatActionSheetExposesActualMediaAndInlineTerminal() {
+        activity.onNodeWithTag("chat-plus").performClick()
+        activity.onNodeWithTag("chat-terminal-toggle").assertExists()
+        activity.onNodeWithText("الكاميرا").assertExists()
+        activity.onNodeWithText("المهارات والإضافات").assertExists()
+    }
 
     @Test fun firstMessageUsesRealPackagedPythonThroughTheVisibleSendButton() {
         // Only the external model is replaced. Installation, checkout, native
