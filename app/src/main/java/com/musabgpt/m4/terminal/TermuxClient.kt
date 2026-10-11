@@ -21,7 +21,28 @@ object TermuxClient {
         return JSONObject().put("installed", installed).put("permission_granted", context.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED)
             .put("external_apps", "unknown_until_command_result").put("backend", "termux")
     }
-    fun run(context: Context, args: JSONObject, owner: String): JSONObject {
+    fun run(context: Context, args: JSONObject, owner: String): JSONObject =
+        execute(context, args, owner, preapproved = false)
+
+    /**
+     * A previously approved, immutable scheduled command may run in background
+     * without an interactive dialog. Verify ownership, command and enabled
+     * state directly at the authorization boundary.
+     */
+    fun runApprovedTask(context: Context, task: com.musabgpt.m4.scheduler.ScheduledTask): JSONObject {
+        val current = com.musabgpt.m4.scheduler.TaskDatabase.get(context).find(task.id)
+            ?: return JSONObject().put("status", "denied").put("error", "المهمة لم تعد موجودة")
+        require(current.id == task.id && current.owner == task.owner &&
+            current.command == task.command && current.enabled) {
+            "فشل التحقق من صلاحية الأمر المجدول"
+        }
+        val request = JSONObject().put("executable", "bash")
+            .put("arguments", org.json.JSONArray(listOf("-lc", task.command)))
+            .put("timeout", 90)
+        return execute(context, request, task.owner, preapproved = true)
+    }
+
+    private fun execute(context: Context, args: JSONObject, owner: String, preapproved: Boolean): JSONObject {
         if (!status(context).getBoolean("installed")) return JSONObject().put("status", "unavailable").put("error", "Termux غير مثبت؛ لا يوجد تشغيل بديل عبر الطرفية العربية.")
         val executable = args.getString("executable")
         require(executable.matches(Regex("[a-zA-Z][a-zA-Z0-9_.-]{0,80}"))) { "اسم برنامج Termux غير صالح" }
@@ -29,9 +50,13 @@ object TermuxClient {
         require(arguments.length() <= 50 && arguments.toString().length <= 12000)
         val cwd = args.optString("cwd", "/data/data/com.termux/files/home")
         require(cwd.startsWith("/data/data/com.termux/files/") && !cwd.split('/').contains(".."))
-        if (!CapabilityBroker.request(owner, "تشغيل داخل Termux", args)) return JSONObject().put("status", "denied").put("error", "رفض المستخدم أمر Termux")
-        if (context.checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED && !HostPermissionRequest.request(PERMISSION))
-            return JSONObject().put("status", "permission_required").put("needs", PERMISSION).put("error", "لم تمنح صلاحية Termux RUN_COMMAND")
+        if (!preapproved && !CapabilityBroker.request(owner, "تشغيل داخل Termux", args))
+            return JSONObject().put("status", "denied").put("error", "رفض المستخدم أمر Termux")
+        if (context.checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED) {
+            if (preapproved || !HostPermissionRequest.request(PERMISSION))
+                return JSONObject().put("status", "permission_required").put("needs", PERMISSION)
+                    .put("error", "يلزم منح صلاحية Termux RUN_COMMAND من إعدادات Android")
+        }
         val id = UUID.randomUUID().toString(); val nonce = UUID.randomUUID().toString()
         val folder = File(directory(context), id).apply { mkdirs() }
         File(folder, "request.json").writeText(JSONObject().put("owner", owner).put("nonce", nonce).put("command", args).toString())
