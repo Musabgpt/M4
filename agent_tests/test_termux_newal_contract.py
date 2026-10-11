@@ -68,16 +68,21 @@ class NewAlFixture(http.server.BaseHTTPRequestHandler):
             st["turn"] += 1
             st["current"] = True
             return self.respond({"started": True, "session": "contract-session"})
+        if path == "/api/approvals/approve-001" and payload is not None:
+            st["approval_decision"] = payload["answer"]
+            return self.respond({"ok": True})
         if path == "/api/sessions/contract-session":
             old = {"type": "turn_end", "turn": st["turn"] - 1, "answer": "STALE-PRIOR-ANSWER"}
             fresh = {"type": "turn_end", "turn": st["turn"],
                      "answer": "NEW-VERIFIED-ANSWER-" + str(st["turn"])}
+            pending = bool(st.get("require_approval") and st["current"]
+                           and not st.get("approval_decision"))
             return self.respond({
                 "meta": {"turn": st["turn"]},
-                "events": [old, fresh] if st["current"] else [
-                    {"type": "turn_end", "turn": 5, "answer": "STALE-PRIOR-ANSWER"}],
-                "busy": False,
-                "approvals": [],
+                "events": [old, fresh] if st["current"] and not pending else [old],
+                "busy": pending,
+                "approvals": [{"id":"approve-001","tool":"shell",
+                               "input":{"command":"echo TEST"}}] if pending else [],
             })
         self.send_error(404)
 
@@ -92,6 +97,49 @@ class NewAlFixture(http.server.BaseHTTPRequestHandler):
 class TermuxNewAlContractTest(unittest.TestCase):
     def test_python_source_is_valid(self):
         self.assertIn("prior_turn", embedded_worker())
+
+    def test_consent_round_trip_does_not_resend_user_message(self):
+        import base64
+        with socket.socket() as port:
+            try:
+                port.bind(("127.0.0.1", 8791))
+            except OSError as error:
+                self.skipTest("Port 8791 already occupied: " + str(error))
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".newal-cloud").mkdir()
+            (home / ".newal-cloud/key").write_text("m4-test-session-key")
+            state = {"send_calls": 0, "mode_updates": 0, "turn": 5,
+                     "current": False, "message": "", "require_approval": True}
+            handler = type("ConsentFixture", (NewAlFixture,), {"state": state})
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", 8791), handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                env = dict(os.environ, HOME=str(home))
+                encoded = base64.b64encode("نفذ المهمة".encode()).decode()
+                common = [sys.executable, "-c", embedded_worker(),
+                          "test-owner", encoded, "ask_always"]
+                first = subprocess.run(common, capture_output=True, text=True,
+                                       env=env, timeout=10)
+                self.assertEqual(first.returncode, 0, first.stderr)
+                question = json.loads(first.stdout)
+                self.assertEqual(question["status"], "approval_required")
+                self.assertEqual(question["approval_id"], "approve-001")
+                self.assertEqual(state["send_calls"], 1)
+                resumed = subprocess.run(common +
+                    ["resume", "approve-001", str(question["prior_turn"]), "allow"],
+                    capture_output=True, text=True, env=env, timeout=10)
+                self.assertEqual(resumed.returncode, 0, resumed.stderr)
+                answer = json.loads(resumed.stdout)
+                self.assertEqual(answer["content"], "NEW-VERIFIED-ANSWER-6")
+                self.assertEqual(state["approval_decision"], "once")
+                self.assertEqual(state["send_calls"], 1,
+                    "Resuming an approval must never repeat an external action")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
 
     def test_authenticated_new_turn_never_returns_stale_receipt(self):
         with socket.socket() as check:
