@@ -159,7 +159,7 @@ fun ChatScreen(
                 HorizontalDivider()
                 TextButton(onClick = { addSheet = false; openPanel("browser") }) { Text("البحث والمتصفح") }
                 TextButton(onClick = { addSheet = false; toggleTerminal() }, modifier = Modifier.testTag("chat-terminal-toggle")) { Text("الطرفية داخل المحادثة") }
-                TextButton(onClick = { addSheet = false; openPanel("tools") }) { Text("المهارات والإضافات") }
+                TextButton(onClick = { addSheet = false; openPanel("tools") }, modifier = Modifier.testTag("sheet-skills")) { Text("المهارات والإضافات") }
                 TextButton(onClick = { addSheet = false; openPanel("tasks") }) { Text("المهام المجدولة") }
                 TextButton(onClick = { addSheet = false; showAgentConfirm = true }, enabled = input.isNotBlank() && !isStreaming) { Text("تنفيذ المشروع باستخدام الأدوات") }
                 TextButton(onClick = { addSheet = false; permissionsOpen = true }) { Text("صلاحيات الوكيل") }

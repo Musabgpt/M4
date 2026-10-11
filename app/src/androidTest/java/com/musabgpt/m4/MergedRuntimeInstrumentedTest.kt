@@ -30,12 +30,15 @@ class MergedRuntimeInstrumentedTest {
     @get:Rule val activity = createAndroidComposeRule<M4ChatActivity>()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val owner = "qa-" + UUID.randomUUID().toString()
-    private fun evidence(name: String, text: String) { File(context.filesDir, "qa").apply { mkdirs() }.resolve(name).writeText(text) }
+    private fun evidence(name: String, text: String) {
+        File(context.filesDir, "qa").apply { mkdirs() }.resolve(name).writeText(text)
+        android.util.Log.i("M4QAReceipt", name + " " + text.take(3500))
+    }
 
     @Test fun chatActionSheetExposesActualMediaAndInlineTerminal() {
         activity.onNodeWithTag("chat-plus").performClick()
         activity.onNodeWithText("الكاميرا").assertExists()
-        activity.onNodeWithText("المهارات والإضافات").assertExists()
+        activity.onNodeWithTag("sheet-skills").assertExists()
         activity.onNodeWithTag("chat-terminal-toggle").performClick()
         activity.onNodeWithTag("inline-terminal").assertExists()
     }
@@ -79,6 +82,8 @@ class MergedRuntimeInstrumentedTest {
                     .put("alpine_installed", LinuxEnvironment.installed(context))
                     .put("project_present", File(LinuxEnvironment.rootfs(context), "root/projects/M4/.git").isDirectory)
                     .put("exception", failure.javaClass.simpleName)
+                    .put("terminal_tail", vm.terminal.state.value.frame?.text?.takeLast(2400) ?: "")
+                    .put("runtime_preparing", vm.terminal.state.value.preparing)
                 evidence("first-message-failure.json", diagnostics.toString(2))
                 throw failure
             }
