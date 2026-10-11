@@ -182,7 +182,7 @@ print(json.dumps({'status':'succeeded','content':answer,'backend':'termux-newal'
             return JSONObject().put("status", "failed")
                 .put("content", "نتيجة Termux تجاوزت حجم السجل المسموح؛ لا يمكن تأكيد الرد")
         val stdout = receipt.optString("stdout").trim()
-        return runCatching { JSONObject(stdout.substringAfterLast('\\n')) }.getOrElse {
+        return runCatching { JSONObject(stdout.substringAfterLast('\n')) }.getOrElse {
             JSONObject().put("status", "failed")
                 .put("content", "خادم NewAl لم يُعد JSON صالحاً: " + stdout.takeLast(300))
         }
