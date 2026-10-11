@@ -321,7 +321,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val shell = if (clean.startsWith("!") && clean.length > 1 && attached.isEmpty()) clean.drop(1).trim() else null
                 val youtube = if (shell == null && attached.isEmpty()) com.musabgpt.m4.phone.YouTubeActions.parse(clean) else null
-                val target = if (youtube == null && attached.isEmpty()) PhoneIntent.openTarget(clean) else null
+                val appSearch = if (shell == null && youtube == null && attached.isEmpty())
+                    com.musabgpt.m4.phone.LocalAppSearch.parse(clean) else null
+                val target = if (youtube == null && appSearch == null && attached.isEmpty())
+                    PhoneIntent.openTarget(clean) else null
                 val result = if (shell != null && _permissionMode.value != "plan_only") {
                     val receipt = withContext(Dispatchers.IO) {
                         com.musabgpt.m4.terminal.TermuxClient.run(getApplication(), JSONObject()
@@ -334,6 +337,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         .put("content", if (receipt.optString("status") == "succeeded")
                             receipt.optString("stdout") + receipt.optString("stderr")
                             else receipt.optString("error", receipt.toString(2)))
+                } else if (appSearch != null && _permissionMode.value != "plan_only") {
+                    com.musabgpt.m4.phone.LocalAppSearch.search(
+                        getApplication(), convId, appSearch
+                    )
                 } else if (youtube != null && _permissionMode.value != "plan_only") {
                     val launched = com.musabgpt.m4.phone.YouTubeActions.search(getApplication(), youtube)
                     var message = launched.optString("message", launched.optString("error"))
