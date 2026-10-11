@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import com.musabgpt.m4.runtime.CapabilityBroker
 import com.musabgpt.m4.runtime.HostPermissionRequest
-import com.musabgpt.m4.artifacts.ArtifactRepository
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -115,8 +114,8 @@ object TermuxClient {
                 else if (bundle.getInt("exitCode") == 0) "succeeded" else "failed")
             .put("truncated", bundle.getInt("stdout_original_length", 0) > 64000 || bundle.getInt("stderr_original_length", 0) > 64000)
         if (error != android.app.Activity.RESULT_OK) row.put("error", bundle.getString("errmsg", "Termux command rejected").take(1000))
-        val artifact = ArtifactRepository.saveReport(context, request.getString("owner"), "termux-${segments[0]}.md", "# Termux command receipt\n\n```json\n${row.toString(2)}\n```\n")
-        row.put("report_artifact", artifact.json())
+        // The private result.json is the receipt. Do not turn internal
+        // transport failures into visible .md artifacts inside the chat.
         val temporary = File(folder, ".result.tmp"); temporary.writeText(row.toString()); require(temporary.renameTo(File(folder, "result.json")))
     }
 }
