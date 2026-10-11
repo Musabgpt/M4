@@ -13,33 +13,48 @@ import androidx.compose.ui.unit.dp
 import com.musabgpt.m4.ChatViewModel
 import com.musabgpt.m4.terminal.TermuxClient
 import io.musab.arabicterminal.UiControlService
-import org.json.JSONArray
-import org.json.JSONObject
 
-@Composable fun ToolsPanel(vm: ChatViewModel, showChat: () -> Unit) {
+/** User-facing tools, no editable raw JSON or pretend MCP registrations. */
+@Composable
+fun ToolsPanel(vm: ChatViewModel, showChat: () -> Unit) {
     val context = LocalContext.current
-    var executable by remember { mutableStateOf("python") }
-    var arguments by remember { mutableStateOf("[\"--version\"]") }
-    var mcpConfig by remember { mutableStateOf("{\"name\":\"local\",\"transport\":\"stdio\",\"command\":[\"python3\",\"server.py\"]}") }
-    var error by remember { mutableStateOf("") }
-    fun command(text: String) { vm.send(text); showChat() }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var termux by remember { mutableStateOf(TermuxClient.status(context)) }
+    fun open(route: String) {
+        vm.send(route)
+        showChat()
+    }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
         Text("الأدوات والقدرات", style = MaterialTheme.typography.titleLarge)
-        Text("المحرك: Termux المثبت على الهاتف فقط")
-        Text("التحكم بالهاتف: " + if (UiControlService.current() != null) "الخدمة مفعلة" else "غير مفعل")
-        TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text("إعدادات التحكم بالهاتف") }
-        Row { TextButton(onClick = { command("/phone apps") }) { Text("التطبيقات المثبتة") }; TextButton(onClick = { command("/phone screen") }) { Text("قراءة الشاشة") } }
-        Text("Termux — المحرك الأساسي", style = MaterialTheme.typography.titleMedium)
-        Text(TermuxClient.status(context).toString())
-        OutlinedTextField(executable, { executable = it }, label = { Text("اسم البرنامج") })
-        OutlinedTextField(arguments, { arguments = it }, label = { Text("وسائط البرنامج كـ JSON array") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { try { command("/termux run " + JSONObject().put("executable", executable).put("arguments", JSONArray(arguments)).toString()) } catch (e: Exception) { error = e.message.orEmpty() } }) { Text("مراجعة أمر Termux وتشغيله") }
-        Text("Skills / MCP / Hooks", style = MaterialTheme.typography.titleMedium)
-        Row { TextButton(onClick = { command("/skills") }) { Text("المهارات") }; TextButton(onClick = { command("/mcp") }) { Text("اتصالات MCP") }; TextButton(onClick = { command("/hooks") }) { Text("Hooks") } }
-        OutlinedTextField(mcpConfig, { mcpConfig = it }, label = { Text("إعداد اتصال MCP") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { try { JSONObject(mcpConfig); command("/mcp connect $mcpConfig") } catch (e: Exception) { error = e.message.orEmpty() } }) { Text("مراجعة وربط MCP") }
-        Row { TextButton(onClick = { command("/tools") }) { Text("الأدوات المسجلة") }; TextButton(onClick = { command("/doctor") }) { Text("فحص البيئة") }; TextButton(onClick = { command("/agents") }) { Text("تقارير المراجعة") } }
-        TextButton(onClick = { command("/memory قرارات المشروع") }) { Text("ذاكرة المشروع") }
-        if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        Text("محرك التنفيذ: Termux المثبت على الهاتف")
+        Text("Termux: " + if (termux.optBoolean("installed")) "مثبت" else "غير مثبت")
+        Text("صلاحية التنفيذ: " +
+            if (termux.optBoolean("permission_granted")) "ممنوحة" else "مطلوبة")
+        TextButton(onClick = { termux = TermuxClient.status(context) }) { Text("تحديث حالة Termux") }
+        Button(onClick = { open("/termux") }) { Text("فتح أوامر Termux داخل M4") }
+        OutlinedButton(onClick = { open("/setup") }) { Text("تجهيز وكيل NewAl تلقائياً") }
+        HorizontalDivider()
+        Text("GitHub والمشاريع", style = MaterialTheme.typography.titleMedium)
+        Button(onClick = { open("/github") }) { Text("فتح GitHub والمستودعات") }
+        Row {
+            TextButton(onClick = { open("/files") }) { Text("الملفات") }
+            TextButton(onClick = { open("/tasks") }) { Text("المهام المجدولة") }
+        }
+        HorizontalDivider()
+        Text("التحكم بالهاتف", style = MaterialTheme.typography.titleMedium)
+        Text(
+            if (UiControlService.current() != null)
+                "خدمة التحكم بالهاتف مفعّلة"
+            else "خدمة التحكم بالهاتف غير مفعّلة"
+        )
+        TextButton(onClick = {
+            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }) { Text("فتح إعدادات إمكانية الوصول") }
+        HorizontalDivider()
+        Text("المهارات وMCP", style = MaterialTheme.typography.titleMedium)
+        Text("تحتاج هذه الأدوات إلى تجهيز وكيل NewAl. لا أعتبر الاتصال بها ناجحاً قبل اختباره.")
+        TextButton(onClick = { open("/doctor") }) { Text("فحص المحرك") }
     }
 }
