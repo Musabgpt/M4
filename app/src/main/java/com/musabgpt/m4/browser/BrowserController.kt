@@ -150,7 +150,7 @@ class BrowserController(private val context: Context) {
                     .put("error", "لم يُرسَم محتوى WebView في لقطة الشاشة؛ لم تُحفَظ صورة فارغة")
                 val output = java.io.ByteArrayOutputStream()
                 require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-                ArtifactRepository.saveBinary(context, owner,
+                return ArtifactRepository.saveBinary(context, owner,
                     args.optString("name", "browser.png"), "image/png",
                     output.toByteArray()).json().put("status", "verified").put("published", true)
             } finally {
