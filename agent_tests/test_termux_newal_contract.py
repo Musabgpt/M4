@@ -58,6 +58,10 @@ class NewAlFixture(http.server.BaseHTTPRequestHandler):
         if path == "/api/sessions" and payload is not None:
             st["mode"] = payload["mode"]
             return self.respond({"id": "contract-session"})
+        if path == "/api/sessions/contract-session/settings":
+            st["mode"] = payload["mode"]
+            st["mode_updates"] += 1
+            return self.respond({"meta": {"mode": st["mode"]}})
         if path == "/api/sessions/contract-session/send":
             st["send_calls"] += 1
             st["message"] = payload["text"]
@@ -98,7 +102,7 @@ class TermuxNewAlContractTest(unittest.TestCase):
             key.parent.mkdir()
             key.write_text("m4-test-session-key")
             os.chmod(key, 0o600)
-            state = {"send_calls": 0, "current": False, "message": ""}
+            state = {"send_calls": 0, "mode_updates": 0, "current": False, "message": ""}
             handler = type("ScopedNewAlFixture", (NewAlFixture,), {"state": state})
             server = http.server.ThreadingHTTPServer(("127.0.0.1", 8791), handler)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -120,6 +124,7 @@ class TermuxNewAlContractTest(unittest.TestCase):
                 self.assertEqual(state["send_calls"], 1)
                 self.assertEqual(state["message"], "افتح المشروع")
                 self.assertEqual(state["mode"], "read-only")
+                self.assertEqual(state["mode_updates"], 1)
             finally:
                 server.shutdown()
                 server.server_close()
