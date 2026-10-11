@@ -379,7 +379,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 edit(convId) { c ->
                     c.copy(messages = c.messages.map {
-                        if (it.id == reply.id) it.copy(content = "تعذّر إكمال الرد. فحص المحرك /doctor يوضّح حالة Termux.")) else it
+                        if (it.id == reply.id) it.copy(content = "تعذّر إكمال الرد. فحص المحرك /doctor يوضّح حالة Termux.") else it
                     })
                 }
             } finally {
