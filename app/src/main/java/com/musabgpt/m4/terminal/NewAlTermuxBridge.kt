@@ -31,9 +31,24 @@ if not owner.replace('-','').isalnum() or len(owner)>80: raise ValueError('Inval
 message=base64.b64decode(payload).decode('utf-8')
 if len(message)>24000: raise ValueError('Message too long')
 home=os.path.expanduser('~')
-keys=[os.path.join(home,'.newal-cloud','key'),os.path.join(home,'.newal-code','termux','key'),os.path.join(home,'.newal-code','server-key')]
+# M4 owns the Termux integration. A pairing key must NEVER be a manual
+# prerequisite: keep it inside Termux and provision it on first real use.
+state_dir=os.path.join(home,'.newal-code','termux')
+os.makedirs(state_dir,mode=0o700,exist_ok=True)
+os.chmod(state_dir,0o700)
+keyfile=os.path.join(state_dir,'key')
+keys=[os.path.join(home,'.newal-cloud','key'),keyfile,os.path.join(home,'.newal-code','server-key')]
 key=next((open(p,encoding='utf-8').read().strip() for p in keys if os.path.isfile(p)),None)
-if not key: raise RuntimeError('NewAl Code pairing key not found in Termux; link NewAl Code first')
+if not key:
+    import secrets
+    key=secrets.token_urlsafe(32)
+    try:
+        with os.fdopen(os.open(keyfile,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600),'w') as fh:
+            fh.write(key)
+    except FileExistsError:
+        with open(keyfile,encoding='utf-8') as fh:
+            key=fh.read().strip()
+if len(key)<16: raise RuntimeError('M4_BOOTSTRAP_INVALID_KEY')
 base='http://127.0.0.1:8791'
 def api(path,body=None):
     method='POST' if body is not None else 'GET'
@@ -47,12 +62,68 @@ def ready():
     try: return isinstance(api('/api/state'),dict)
     except Exception: return False
 if not ready():
-    for command in ('newal-termux',):
-        exe=os.path.join(os.environ.get('PREFIX','/data/data/com.termux/files/usr'),'bin',command)
-        if os.path.exists(exe):
-            subprocess.run([exe,'start'],capture_output=True,timeout=20)
-            break
-    if not ready(): raise RuntimeError('NewAl Code server is not running in Termux on port 8791')
+    # Do not install a separate app or wait for a manual NewAl pairing wizard.
+    # Install the user's OWN NewAl source at a fixed immutable Git commit.
+    import io,zipfile,tempfile,shutil,stat,socket
+    app_dir=os.path.join(state_dir,'app')
+    source='https://codeload.github.com/Musabgpt/NewAl/zip/abfa91ee0644b27ba1957567ab484d4073d71efd'
+    if not os.path.isfile(os.path.join(app_dir,'newal_code','__main__.py')):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(source,
+                    headers={'User-Agent':'M4-Termux-NewAl-Installer/1'}),timeout=25) as response:
+                archive=response.read(12500001)
+            if len(archive)>12500000: raise ValueError('Archive exceeds safe size')
+            staging=tempfile.mkdtemp(prefix='newal-staged-',dir=state_dir)
+            try:
+                count=0
+                total=0
+                with zipfile.ZipFile(io.BytesIO(archive)) as pkg:
+                    for info in pkg.infolist():
+                        marker='/desktop/newal_code/'
+                        if marker not in info.filename: continue
+                        rel=info.filename.split(marker,1)[1]
+                        if not rel or info.is_dir(): continue
+                        pieces=rel.split('/')
+                        if any(p in ('','.','..') for p in pieces): raise ValueError('Unsafe archive path')
+                        if stat.S_ISLNK(info.external_attr>>16): raise ValueError('Symlink in archive')
+                        count+=1
+                        total+=info.file_size
+                        if count>200 or total>7500000 or info.file_size>1500000:
+                            raise ValueError('Package size limit exceeded')
+                        target=os.path.join(staging,'newal_code',*pieces)
+                        os.makedirs(os.path.dirname(target),exist_ok=True)
+                        with pkg.open(info) as src, open(target,'wb') as dst:
+                            shutil.copyfileobj(src,dst)
+                if not os.path.isfile(os.path.join(staging,'newal_code','__main__.py')):
+                    raise ValueError('NewAl Python package absent in pinned archive')
+                if not os.path.isdir(app_dir): os.replace(staging,app_dir)
+            finally:
+                if os.path.isdir(staging): shutil.rmtree(staging)
+        except Exception as error:
+            raise RuntimeError('M4_BOOTSTRAP_DOWNLOAD_FAILED: '+type(error).__name__) from None
+    if not ready():
+        # If another process holds the loopback port, never bypass auth or
+        # silently start NewAl on an unexpected port.
+        with socket.socket() as probe:
+            probe.settimeout(0.6)
+            if probe.connect_ex(('127.0.0.1',8791))==0:
+                raise RuntimeError('M4_BOOTSTRAP_PORT_BUSY')
+        env=os.environ.copy()
+        env['NEWAL_SERVER_KEY']=key
+        env['NEWAL_CODE_HOME']=os.path.join(home,'.newal-code')
+        env['PYTHONPATH']=app_dir+os.pathsep+env.get('PYTHONPATH','')
+        log=os.path.join(state_dir,'server.log')
+        with open(log,'ab',buffering=0) as out:
+            proc=subprocess.Popen([sys.executable,'-m','newal_code','app',
+                    '--port','8791','--no-browser'],cwd=home,env=env,
+                    stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.STDOUT,
+                    start_new_session=True)
+        for wait in range(60):
+            if ready(): break
+            if proc.poll() is not None:
+                raise RuntimeError('M4_BOOTSTRAP_SERVER_FAILED: see Termux server.log')
+            time.sleep(0.35)
+        if not ready(): raise RuntimeError('M4_BOOTSTRAP_SERVER_TIMEOUT')
 sessions_path=os.path.join(home,'.m4-newal-sessions.json')
 try:
     sessions=json.load(open(sessions_path,encoding='utf-8'))
