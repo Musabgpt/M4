@@ -1,0 +1,64 @@
+name: M4 — Real NewAl backend contract
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-newal-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone pinned user-owned NewAl source
+        run: |
+          git clone --depth 1 --branch ccr-e40af0a0-eec37q https://github.com/Musabgpt/NewAl.git /tmp/m4-newal-source
+          test "$(git -C /tmp/m4-newal-source rev-parse HEAD)" = "abfa91ee0644b27ba1957567ab484d4073d71efd"
+      - name: Start real NewAl Code server from pinned revision
+        run: |
+          mkdir -p /tmp/m4-newal-home
+          PYTHONPATH=/tmp/m4-newal-source/desktop NEWAL_CODE_HOME=/tmp/m4-newal-home \
+          NEWAL_SERVER_KEY=m4-ci-only-authentication-key-32 \
+            python3 -m newal_code app --port 8791 --no-browser > /tmp/m4-newal-server.log 2>&1 &
+          echo $! > /tmp/m4-newal-server.pid
+      - name: Authenticate, create session and confirm API contract
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, time, urllib.error, urllib.request
+          base="http://127.0.0.1:8791"
+          key="m4-ci-only-authentication-key-32"
+          def call(path, data=None, auth=key):
+              headers={"X-NewAl-Key":auth, "Content-Type":"application/json"}
+              encoded=json.dumps(data).encode() if data is not None else None
+              with urllib.request.urlopen(urllib.request.Request(base+path, data=encoded, headers=headers),timeout=5) as r:
+                  return json.load(r)
+          for _ in range(50):
+              try:
+                  state=call("/api/state")
+                  break
+              except (OSError, urllib.error.HTTPError):
+                  time.sleep(.25)
+          else: raise RuntimeError("Actual NewAl server failed to start")
+          assert state["name"] == "NewAl Code",state
+          try:
+              call("/api/state",auth="not-the-key")
+              raise AssertionError("Server leaked state to unauthenticated client")
+          except urllib.error.HTTPError as e: assert e.code==401
+          root="/tmp/m4-newal-home"
+          created=call("/api/sessions",{"root":root,"mode":"read-only","warm":False})
+          sid=created["id"]
+          detail=call("/api/sessions/"+sid)
+          assert detail["meta"]["mode"]=="read-only",detail["meta"]
+          configured=call("/api/sessions/"+sid+"/settings",{"mode":"ask"})
+          detail=call("/api/sessions/"+sid)
+          assert detail["meta"]["mode"]=="ask"
+          print("PASS: real NewAl pinned server is reachable, private, authenticated and supports sessions")
+          PY
+      - name: Preserve evidence and stop server
+        if: always()
+        run: |
+          cat /tmp/m4-newal-server.log || true
+          if [ -f /tmp/m4-newal-server.pid ]; then kill "$(cat /tmp/m4-newal-server.pid)" || true; fi
