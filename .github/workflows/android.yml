@@ -98,6 +98,7 @@ jobs:
           if-no-files-found: error
 
       - name: Detect original NewAl signing identity (M4 repository secret)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         id: persistent_signing
         env:
           MUSABAI_RELEASE_SIGNING_BUNDLE: ${{ secrets.MUSABAI_RELEASE_SIGNING_BUNDLE }}
