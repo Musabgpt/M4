@@ -64,6 +64,8 @@ if not sid:
     with open(temporary,'w',encoding='utf-8') as fh: json.dump(sessions,fh)
     os.chmod(temporary,0o600)
     os.replace(temporary,sessions_path)
+prior=api('/api/sessions/'+sid)
+prior_turn=int((prior.get('meta') or {}).get('turn') or 0)
 sent=api('/api/sessions/'+sid+'/send',{'text':message,'lang':'ar'})
 if not sent.get('started'):
     print(json.dumps({'status':'observed','content':str(sent.get('reply',''))},ensure_ascii=False))
@@ -78,7 +80,9 @@ while time.monotonic()<deadline:
         sys.exit(0)
     if not current.get('busy'):
         for ev in reversed(current.get('events') or []):
-            if ev.get('type')=='turn_end':
+            # Old turn_end receipts may still be in persisted session events.
+            # Match only the actual new turn, never report a stale answer.
+            if ev.get('type')=='turn_end' and int(ev.get('turn') or 0)>prior_turn:
                 answer=ev.get('answer','')
                 if ev.get('error'): raise RuntimeError(str(ev['error'])[:500])
                 break
