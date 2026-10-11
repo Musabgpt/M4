@@ -20,6 +20,9 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from newal import continuity, task_state
 from provider_routes import order as gateway_order
+from m4core.runtime import run as run_m4core
+from m4core.registry import TOOL_SCHEMAS as M4_TOOL_SCHEMAS
+from m4core.permissions import MODES as M4_PERMISSION_MODES
 
 STATE = ".term-agent"
 COMMANDS = {"python","python3","node","npm","npx","git","gh","pytest","vitest",
@@ -344,9 +347,13 @@ def main():
     r.add_argument("goal",nargs="?")
     r.add_argument("--steps",type=int,default=30)
     r.add_argument("--allow-exec",action="store_true")
+    r.add_argument("--permission-mode",choices=M4_PERMISSION_MODES,default="accept_edits")
+    r.add_argument("--legacy",action="store_true",help="Use old seven-tool loop")
     re=sub.add_parser("resume")
     re.add_argument("--steps",type=int,default=30)
     re.add_argument("--allow-exec",action="store_true")
+    re.add_argument("--permission-mode",choices=M4_PERMISSION_MODES,default="accept_edits")
+    re.add_argument("--legacy",action="store_true",help="Use old seven-tool loop")
     sub.add_parser("status")
     sub.add_parser("tasks")
     sub.add_parser("doctor")
@@ -364,8 +371,8 @@ def main():
             print(item,shutil.which(item) or "not installed")
         return 0
     if args.action=="tools":
-        for entry in TOOLS:
-            print("[built-in]",entry["function"]["name"],"—",entry["function"]["description"])
+        for entry in M4_TOOL_SCHEMAS:
+            print("[M4 core]",entry["function"]["name"],"—",entry["function"]["description"])
         return 0
     root,state=workspace(args.project)
     if args.action=="init":
@@ -396,7 +403,12 @@ def main():
         return 0 if ok else 2
     if args.steps<1 or args.steps>500:
         raise ValueError("--steps must be between 1 and 500")
-    return loop(root,state,getattr(args,"goal",None),args.steps,args.allow_exec)
+    if args.legacy:
+        return loop(root,state,getattr(args,"goal",None),args.steps,args.allow_exec)
+    if args.permission_mode == "auto" and not args.allow_exec:
+        raise ValueError("Auto mode requires --allow-exec; dangerous Bash still denied")
+    return run_m4core(sys.modules[__name__],root,state,getattr(args,"goal",None),
+                      args.steps,args.allow_exec,args.permission_mode)
 
 if __name__=="__main__":
     try:
