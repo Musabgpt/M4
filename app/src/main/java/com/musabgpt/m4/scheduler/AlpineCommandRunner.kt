@@ -17,7 +17,11 @@ object AlpineCommandRunner {
             "-0", "-b", "/dev", "-b", "/proc", "-b", "/sys", "-w", "/root/projects/M4", "/usr/bin/python3", "-c", LOCKED_COMMAND, command)
         builder.environment().apply {
             keys.filter { it.endsWith("_TOKEN") || it.endsWith("_KEY") || it.endsWith("_SECRET") || it.endsWith("_PASSWORD") }.forEach { remove(it) }
-            put("PROOT_LOADER", libraries + "/libproot-loader.so"); put("PROOT_NO_SECCOMP", "1")
+            put("PROOT_LOADER", libraries + "/libproot-loader.so")
+            // Match native PTY PRoot: disable seccomp only where required.
+            // On Android x86_64 emulator PROOT_NO_SECCOMP=1 can break fork.
+            if (android.os.Build.SUPPORTED_ABIS.firstOrNull() == "x86_64") remove("PROOT_NO_SECCOMP")
+            else put("PROOT_NO_SECCOMP", "1")
             put("PROOT_TMP_DIR", context.cacheDir.absolutePath); put("LD_LIBRARY_PATH", libraries)
             put("HOME", "/root"); put("LANG", "C.UTF-8")
             put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
