@@ -26,7 +26,7 @@ phase=sys.argv[4] if len(sys.argv)>4 else 'start'
 decision_id=sys.argv[5] if len(sys.argv)>5 else ''
 baseline=int(sys.argv[6]) if len(sys.argv)>6 else 0
 allow=(sys.argv[7]=='allow') if len(sys.argv)>7 else False
-if phase not in ('start','resume'): raise ValueError('Unknown transport phase')
+if phase not in ('start','resume','setup'): raise ValueError('Unknown transport phase')
 if not owner.replace('-','').isalnum() or len(owner)>80: raise ValueError('Invalid conversation id')
 message=base64.b64decode(payload).decode('utf-8')
 if len(message)>24000: raise ValueError('Message too long')
@@ -124,6 +124,10 @@ if not ready():
                 raise RuntimeError('M4_BOOTSTRAP_SERVER_FAILED: see Termux server.log')
             time.sleep(0.35)
         if not ready(): raise RuntimeError('M4_BOOTSTRAP_SERVER_TIMEOUT')
+if phase=='setup':
+    print(json.dumps({'status':'succeeded',
+        'content':'تم تجهيز وكيل NewAl داخل Termux وبدء خادمه المحلي بأمان.'},ensure_ascii=False))
+    sys.exit(0)
 sessions_path=os.path.join(home,'.m4-newal-sessions.json')
 try:
     sessions=json.load(open(sessions_path,encoding='utf-8'))
@@ -191,6 +195,11 @@ while time.monotonic()<deadline:
 if answer is None: raise TimeoutError('NewAl Code did not return a finished turn')
 print(json.dumps({'status':'succeeded','content':answer,'backend':'termux-newal'},ensure_ascii=False))
 """.trimIndent()
+
+    /** Set up a real NewAl agent in Termux without sending an AI prompt. */
+    suspend fun setup(context: Context, owner: String): JSONObject = withContext(Dispatchers.IO) {
+        invokeWorker(context, owner, "", "plan_only", "setup", "", 0, false)
+    }
 
     /**
      * The entire user journey stays inside M4: NewAl tool approvals appear in
