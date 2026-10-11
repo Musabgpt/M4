@@ -43,6 +43,40 @@ class MergedRuntimeInstrumentedTest {
         activity.onNodeWithTag("inline-terminal").assertExists()
     }
 
+    @Test fun interactiveAlpinePtyActuallyExecutesShellCommands() {
+        lateinit var vm: ChatViewModel
+        activity.runOnIdle {
+            vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
+            vm.terminal.open()
+        }
+        activity.waitUntil(90000) {
+            val state = vm.terminal.state.value
+            !state.preparing && state.selected?.isLinux == true && !state.selected!!.isFinished
+        }
+        // The echoed input does not contain this contiguous marker.
+        // Only a shell that really executed printf can produce the full token.
+        val suffix = UUID.randomUUID().toString().take(8)
+        val expected = "M4_EXECUTED_" + suffix
+        vm.terminal.execute("printf '%s%s\n' 'M4_EXECUTED_' '" + suffix + "'")
+        try {
+            activity.waitUntil(45000) {
+                vm.terminal.state.value.frame?.text?.contains(expected) == true
+            }
+        } catch (failure: Throwable) {
+            val state = vm.terminal.state.value
+            evidence("pty-command-failure.json", JSONObject()
+                .put("session_finished", state.selected?.isFinished ?: true)
+                .put("runtime", state.status)
+                .put("preparing", state.preparing)
+                .put("display_tail", state.frame?.text?.takeLast(1500) ?: "")
+                .put("exception", failure.javaClass.simpleName).toString(2))
+            throw failure
+        }
+        evidence("pty-command.json", JSONObject()
+            .put("verified_output", expected)
+            .put("terminal", vm.terminal.state.value.status).toString(2))
+    }
+
     @Test fun firstMessageUsesRealPackagedPythonThroughTheVisibleSendButton() {
         // Only the external model is replaced. Installation, checkout, native
         // PTY/PRoot, packaged Python, request/events/response and UI are real.
