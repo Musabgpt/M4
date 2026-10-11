@@ -79,7 +79,8 @@ fun FilesPanel() {
                     val file = requireNotNull(selected)
                     require(allowed(file) && ArtifactRepository.hash(file) == hash) { "تغير الملف؛ أعد قراءته قبل الحفظ" }
                     val relative = file.toRelativeString(root)
-                    require(relative !in setOf("app/src/main/AndroidManifest.xml", "android/signing-cert-sha256.txt", "android/PROTECTED_PATHS", "scripts/build-signed-release.sh") && !relative.startsWith(".github/"))
+                    require(relative !in setOf("app/src/main/AndroidManifest.xml", "android/signing-cert-sha256.txt", "android/PROTECTED_PATHS", "scripts/build-signed-release.sh", "agent/agent.py") &&
+                        !relative.startsWith(".github/") && !relative.startsWith("agent/m4core/"))
                     require(content.toByteArray().size <= 500000)
                     val backups = File(context.filesDir, "editor-backups").apply { mkdirs() }
                     file.copyTo(File(backups, UUID.randomUUID().toString()))

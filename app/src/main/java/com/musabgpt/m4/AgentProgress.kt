@@ -21,6 +21,9 @@ data class AgentProgress(
         "blocked" -> "متوقفة بسبب خطأ"
         "needs-checks" -> "تحتاج اختبارات للتحقق"
         "stuck" -> "الوكيل عالق"
+        "planned" -> "الخطة جاهزة؛ لم يُجرَ تعديل"
+        "canceled" -> "أُلغيت المهمة"
+        "paused-time-limit" -> "توقف عند حد الوقت"
         else -> "الحالة: $phase"
     }
 }

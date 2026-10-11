@@ -33,6 +33,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val providerIndex = _providerIndex.asStateFlow()
     private val _activeRoute = MutableStateFlow("")
     val activeRoute = _activeRoute.asStateFlow()
+    private val _permissionMode = MutableStateFlow(prefs.getString("permission_mode", "auto_project")
+        ?.takeIf { it in setOf("auto_project", "plan_only") } ?: "auto_project")
+    val permissionMode = _permissionMode.asStateFlow()
+    fun setPlanMode(plan: Boolean) {
+        _permissionMode.value = if (plan) "plan_only" else "auto_project"
+        prefs.edit().putString("permission_mode", _permissionMode.value).apply()
+    }
     init {
         // Legacy configuration has no meaning and may contain old API secrets.
         val editor = prefs.edit()
@@ -43,7 +50,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
     private val _conversations = MutableStateFlow(restoreConversations())
     val conversations = _conversations.asStateFlow()
-    private val _currentId = MutableStateFlow(_conversations.value.first().id)
+    private val _currentId = MutableStateFlow(prefs.getString("active_conversation", null)
+        ?.takeIf { id -> _conversations.value.any { it.id == id } } ?: _conversations.value.first().id)
     val currentId = _currentId.asStateFlow()
     private val _streaming = MutableStateFlow(false)
     val streaming = _streaming.asStateFlow()
@@ -77,7 +85,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             array.put(JSONObject().put("id", c.id).put("title", c.title).put("messages", messages))
         }
-        prefs.edit().putString("history", array.toString()).apply()
+        prefs.edit().putString("history", array.toString()).putString("active_conversation", _currentId.value).apply()
     }
 
     fun selectProvider(index: Int) {
@@ -95,7 +103,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun select(id: String) {
         if (_streaming.value) return
-        if (_conversations.value.any { it.id == id }) _currentId.value = id
+        if (_conversations.value.any { it.id == id }) {
+            _currentId.value = id
+            prefs.edit().putString("active_conversation", id).apply()
+        }
     }
     fun stop() {
         ChatApi.stop()
@@ -114,6 +125,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String) {
         val clean = text.trim()
         if (clean.isEmpty() || _streaming.value) return
+        if (clean in setOf("/help", "/plan", "/permissions", "/clear")) {
+            if (clean == "/clear") { newChat(); return }
+            if (clean == "/plan") setPlanMode(_permissionMode.value != "plan_only")
+            val result = when (clean) {
+                "/help" -> "الأوامر: /help، /plan، /permissions، /clear.\nاكتب ! ثم أمر الطرفية لتنفيذه صراحةً. «تنفيذ كود» يشغل الوكيل الحقيقي؛ مرفقاته ونتائج الأدوات تظهر هنا."
+                else -> if (_permissionMode.value == "plan_only") "وضع الوكيل: تخطيط للقراءة فقط" else "وضع الوكيل: تنفيذ داخل المشروع بعد موافقة التشغيل"
+            }
+            edit(_currentId.value) { c -> c.copy(messages = c.messages + UiMessage(role = "user", content = clean) + UiMessage(role = "assistant", content = result)) }
+            saveHistory()
+            return
+        }
         val convId = _currentId.value
         val reply = UiMessage(role = "assistant", content = "")
         edit(convId) { c ->

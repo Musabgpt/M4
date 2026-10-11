@@ -65,6 +65,10 @@ fun SchedulerPanel(owner: String) {
                             TextButton(onClick = { TaskScheduler.pause(context, task.id) }) { Text("إيقاف") }
                             TextButton(onClick = { TaskScheduler.runNow(context, task) }, enabled = task.enabled) { Text("الآن") }
                             TextButton(onClick = { scope.launch { history = withContext(Dispatchers.IO) { TaskDatabase.get(context).lastRun(task.id) } } }) { Text("السجل") }
+                            TextButton(onClick = { scope.launch {
+                                try { withContext(Dispatchers.IO) { TaskScheduler.delete(context, task.id) } }
+                                catch (e: Exception) { error = "تعذر الحذف: ${e.message}" }
+                            } }) { Text("حذف") }
                         }
                     }
                 }
@@ -75,8 +79,11 @@ fun SchedulerPanel(owner: String) {
         AlertDialog(onDismissRequest = { approval = null }, title = { Text("موافقة نطاق المهمة") },
             text = { Text("${task.name}\n${task.command}\nالتكرار: ${task.type}\nسيُنفذ الأمر في الخلفية بصلاحيات ملفات التطبيق. الموافقة تخص هذا الأمر والتكرار؛ لا تمنح وصول GitHub أو إرسال رسائل.\n${task.id}") },
             confirmButton = { TextButton(onClick = {
-                try { TaskScheduler.enable(context, task); approval = null }
-                catch (e: Exception) { error = "تعذرت الجدولة: ${e.message}"; approval = null }
+                approval = null
+                scope.launch {
+                    try { withContext(Dispatchers.IO) { TaskScheduler.enable(context, task) } }
+                    catch (e: Exception) { error = "تعذرت الجدولة: ${e.message}" }
+                }
             }) { Text("موافقة وتفعيل") } }, dismissButton = { TextButton(onClick = { approval = null }) { Text("إلغاء") } })
     }
     history?.let { report -> AlertDialog(onDismissRequest = { history = null }, title = { Text("آخر تشغيل حقيقي") },

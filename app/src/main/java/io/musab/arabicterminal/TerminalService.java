@@ -131,8 +131,10 @@ public final class TerminalService extends Service {
         if(linux && (!LinuxEnvironment.installed(this) || !LinuxEnvironment.runtimeAvailable(this)))
             throw new IOException("بيئة Alpine ليست جاهزة");
         if(linux && bridge==null){
-            bridge=new com.musabgpt.m4.runtime.M4BridgeServer(this);
-            bridge.start();
+            com.musabgpt.m4.runtime.M4BridgeServer candidate=
+                new com.musabgpt.m4.runtime.M4BridgeServer(this);
+            try{candidate.start();bridge=candidate;}
+            catch(Exception failure){candidate.close();}
         }
         String libdir=getApplicationInfo().nativeLibraryDir;
         long handle=NativePty.start(root,getFilesDir().getAbsolutePath(),

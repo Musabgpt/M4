@@ -2,6 +2,7 @@
 """Resumable AI coding loop for the app's Alpine Linux. Python stdlib only."""
 import argparse
 import hashlib
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -27,15 +28,6 @@ STATE = ".term-agent"
 COMMANDS = {"python","python3","node","npm","npx","git","gh","pytest","vitest",
  "gradle","java","javac","bash","sh","rg","grep","ls","find","cat","pwd",
  "eslint","tsc","ast-grep","tree-sitter","cargo","make","cmake"}
-LEGACY_TOOLS = [
- {"type":"function","function":{"name":"list_files","description":"List a directory inside the project.","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}},
- {"type":"function","function":{"name":"read_file","description":"Read a project text file.","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}},
- {"type":"function","function":{"name":"search_code","description":"Bounded literal ripgrep search in project files.","parameters":{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string"}},"required":["query"]}}},
- {"type":"function","function":{"name":"git_status","description":"Show actual Git working-tree changes.","parameters":{"type":"object","properties":{}}}},
- {"type":"function","function":{"name":"write_file","description":"Write UTF-8 project text with automatic backup.","parameters":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}}},
- {"type":"function","function":{"name":"run_command","description":"Run a bounded command after user approves execution.","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}}},
- {"type":"function","function":{"name":"finish","description":"Request independent verification of goal.","parameters":{"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]}}}
-]
 TOOLS = ToolRuntime.describe().schemas
 ACTIVE_REGISTRY = ToolRuntime.describe()
 _RUNTIMES = {}
@@ -87,8 +79,19 @@ def history(state):
     return db
 
 def log(db, kind, data):
+    def bounded(value, depth=0):
+        if depth > 5:
+            return "[bounded]"
+        if isinstance(value, str):
+            return value[:7000]
+        if isinstance(value, dict):
+            return {str(k): bounded(v, depth + 1) for k, v in list(value.items())[:30]}
+        if isinstance(value, list):
+            return [bounded(v, depth + 1) for v in value[:20]]
+        return value
+    data = bounded(data)
     db.execute("INSERT INTO events(time,kind,data) VALUES(?,?,?)",
-               (time.time(),kind,json.dumps(data,ensure_ascii=False)[:16000]))
+               (time.time(),kind,json.dumps(data,ensure_ascii=False)))
     db.commit()
     # Append a bounded durable stream which Android can read without parsing
     # terminal prose. Secrets/configuration are never added to these events.
@@ -100,7 +103,7 @@ def log(db, kind, data):
     if stream_path.exists() and stream_path.stat().st_size > 5_000_000:
         stream_path.replace(db_path / "events.previous.jsonl")
     with stream_path.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(event, ensure_ascii=False)[:30000] + "\n")
+        stream.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 def recent(db):
     rows = db.execute("SELECT kind,data FROM events ORDER BY id DESC LIMIT 10").fetchall()
@@ -155,47 +158,6 @@ def execute(root, state, name, args, approved, runtime=None):
     except (ValueError, OSError, KeyError, UnicodeError, SyntaxError, subprocess.TimeoutExpired) as error:
         return "Tool error: " + str(error)
 
-def legacy_execute(root, state, name, args, approved):
-    """Retained source history for old backups; the runtime uses the registry."""
-    try:
-        if name == "list_files":
-            path=safe_path(root,args.get("path","."))
-            return "\n".join(sorted(p.name+("/" if p.is_dir() else "")
-                        for p in path.iterdir() if p.name not in (".git",STATE))[:250])
-        if name == "read_file":
-            path=safe_path(root,args["path"])
-            if path.stat().st_size > 250000:
-                return "File too large, use rg."
-            return path.read_text(encoding="utf-8")[:50000]
-        if name == "search_code":
-            query=args["query"]
-            if not isinstance(query,str) or not query or len(query)>240:
-                return "Invalid literal search"
-            path=safe_path(root,args.get("path","."))
-            p=subprocess.run(["rg","-F","-n","--max-count","20","--",query,str(path)],
-                             cwd=root,capture_output=True,text=True,timeout=20)
-            return p.stdout[:8000] if p.returncode in (0,1) else "Search error: "+p.stderr[:250]
-        if name == "git_status":
-            p=subprocess.run(["git","status","--short"],cwd=root,
-                             capture_output=True,text=True,timeout=20)
-            return p.stdout[:5000] if p.returncode==0 else "Git error: "+p.stderr[:250]
-        if name == "write_file":
-            path=safe_path(root,args["path"],write=True)
-            data=args["content"]
-            if not isinstance(data,str) or len(data.encode("utf-8"))>500000:
-                return "Invalid write or file larger than 500KB"
-            backup(state,path,args["path"])
-            path.parent.mkdir(parents=True,exist_ok=True)
-            path.write_text(data,encoding="utf-8")
-            return "Wrote "+args["path"]
-        if name == "run_command":
-            return command(root,args["command"],approved)
-        if name == "finish":
-            return "VERIFY"
-        return "Unknown tool "+name
-    except (ValueError,OSError,KeyError,UnicodeError) as error:
-        return "Tool error: "+str(error)
-
 def endpoint():
     routes=gateway_order(os.environ.get("M4_GATEWAY_FAMILY","freellmpool"))
     selected=routes[0]
@@ -219,9 +181,14 @@ def ask(url,model,messages):
                 # accomplish a file edit and must not stop gateway failover.
                 if not isinstance(reply.get("tool_calls"),list) or not reply["tool_calls"]:
                     reply["tool_calls"] = prompted_calls(reply.get("content"), ACTIVE_REGISTRY)
+                    reply["m4_tool_mode"] = "prompted"
+                else:
+                    reply["m4_tool_mode"] = "native"
                 for call in reply["tool_calls"]:
                     fn = call.get("function", {})
                     ACTIVE_REGISTRY.validate(fn.get("name"), json.loads(fn.get("arguments", "{}")))
+                reply["m4_route"] = route.name
+                reply["m4_model"] = route.model
                 return reply
         except (OSError,KeyError,ValueError,IndexError,TypeError) as error:
             errors.append(route.name+": "+str(error)[:110])
@@ -246,6 +213,19 @@ def verify(root,state,approved):
     return passed,json.dumps(outputs,ensure_ascii=False)
 
 def loop(root,state,goal,max_steps,approved,permission_mode=None):
+    # A live kernel lock serializes writers. Never resume a process by stale PID.
+    with (state / "active.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("BLOCKED: another agent owns this project", file=sys.stderr)
+            return 4
+        try:
+            return _loop(root,state,goal,max_steps,approved,permission_mode)
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+def _loop(root,state,goal,max_steps,approved,permission_mode=None):
     global TOOLS, ACTIVE_REGISTRY
     runtime = ToolRuntime(root, state, safe_path, backup, COMMANDS, command, approved, permission_mode)
     TOOLS, ACTIVE_REGISTRY = runtime.registry.schemas, runtime.registry
@@ -262,6 +242,7 @@ def loop(root,state,goal,max_steps,approved,permission_mode=None):
         current["newal_checkpoint"]=checkpoint["id"]
     url,model=endpoint()
     current["phase"]="running"
+    current["owner_session_id"] = os.environ.get("M4_OWNER_SESSION", "terminal")
     save(path,current)
     db=history(state)
     print("GOAL:",goal,"MODEL:",model,flush=True)
@@ -280,7 +261,6 @@ def loop(root,state,goal,max_steps,approved,permission_mode=None):
                 {"role":"user","content":"GOAL: "+goal+"\nProject: "+str(root)+
                   "\nPrevious work:\n"+recent(db)}]
         cycles = []
-        repetitions = {}
         started = time.monotonic()
         for _ in range(max_steps):
             if time.monotonic() - started > 900:
@@ -289,6 +269,10 @@ def loop(root,state,goal,max_steps,approved,permission_mode=None):
                 return 2
             current["step"]+=1
             reply=ask(url,model,dialog)
+            if reply.get("m4_route"):
+                observed_route = {"route": reply["m4_route"], "model": reply["m4_model"], "tool_mode": reply["m4_tool_mode"]}
+                log(db, "provider_route", observed_route)
+                print("Actual provider:", json.dumps(observed_route, ensure_ascii=False), flush=True)
             calls=(reply.get("tool_calls") or [])[:4]
             for pos,call in enumerate(calls):
                 call.setdefault("id","m4-step-"+str(current["step"])+"-"+str(pos))
@@ -296,7 +280,8 @@ def loop(root,state,goal,max_steps,approved,permission_mode=None):
             if calls:
                 dialog.append({"role":"assistant","content":reply.get("content") or None,
                                "tool_calls":calls})
-            signature=hashlib.sha256(json.dumps(calls,sort_keys=True).encode()).hexdigest()
+            signature=hashlib.sha256(json.dumps([{"name":item.get("function", {}).get("name"),
+                "arguments":json.loads(item.get("function", {}).get("arguments", "{}"))} for item in calls],sort_keys=True).encode()).hexdigest()
             if not calls:
                 msg=str(reply.get("content") or "")[:1200]
                 log(db,"assistant",msg)
@@ -314,7 +299,7 @@ def loop(root,state,goal,max_steps,approved,permission_mode=None):
                 except ValueError:
                     args={}
                 output=execute(root,state,name,args,approved,runtime)
-                details={"tool":name,"args":({k:v for k,v in args.items() if k!="content"}),
+                details={"tool":name,"args":({k:v for k,v in args.items() if k not in ("content", "old", "new", "edits")}),
                          "result":output[:7000]}
                 log(db,"tool",details)
                 dialog.append({"role":"tool","tool_call_id":item["id"],"content":output[:7000]})
@@ -356,12 +341,15 @@ def loop(root,state,goal,max_steps,approved,permission_mode=None):
             if current.get("newal_checkpoint"):
                 task_state.checkpoint(
                     str(root),task_id=current["newal_checkpoint"],
-                    progress="Finished verified action cycle "+str(current["step"]),
+                    progress="Recorded observed action cycle "+str(current["step"]),
                     next_step="Continue working and run independent verification",
                     evidence="Recorded events in .term-agent/events.sqlite3")
             current["repeat"]=(current.get("repeat",0)+1 if signature==current.get("last") else 1)
             current["last"]=signature
-            if current["repeat"]>=3:
+            if current["repeat"] == 3:
+                dialog.append({"role": "user", "content": "The same tools and arguments repeated three times. Change strategy; inspect a different relevant source or report the actual blocker. Never invent progress."})
+                log(db, "loop_warning", {"repeat": 3, "message": "Change strategy"})
+            if current["repeat"]>=6:
                 current["phase"]="stuck"
                 save(path,current)
                 print("STUCK: identical repeated actions",flush=True)
@@ -371,6 +359,12 @@ def loop(root,state,goal,max_steps,approved,permission_mode=None):
         save(path,current)
         print("PAUSED: step budget; resume with term-agent resume",flush=True)
         return 2
+    except KeyboardInterrupt:
+        current["phase"] = "canceled"
+        save(path, current)
+        log(db, "cancellation", {"reason": "Interrupted by user"})
+        print("CANCELED: user interrupt", flush=True)
+        return 130
     except (OSError,ValueError,RuntimeError) as error:
         current["phase"]="blocked"
         current["error"]=str(error)

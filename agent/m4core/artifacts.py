@@ -32,6 +32,8 @@ class ArtifactStore:
             raise ValueError("Invalid artifact name")
         if not name.lower().endswith("." + extension):
             name += "." + extension
+        if name == "manifest.json":
+            raise ValueError("Reserved artifact metadata filename")
         return name
 
     def _target(self, name, extension):
@@ -134,6 +136,14 @@ class ArtifactStore:
 
     def bundle(self, args):
         identifier, path = self._target(args["name"], "zip")
+        try:
+            return self._bundle(args, identifier, path)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            path.parent.rmdir()
+            raise
+
+    def _bundle(self, args, identifier, path):
         sources = []
         for relative in args.get("paths", []):
             source = self.safe_path(self.root, relative)

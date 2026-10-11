@@ -52,4 +52,7 @@ case "${M4_GATEWAY_FAMILY:-freellmpool}" in
 esac
 echo "Project source: $project"
 echo "Independent Python agent checks configured. Android APK build runs in GitHub CI."
+if [ "${M4_PERMISSION_MODE:-auto_project}" = "plan_only" ]; then
+  exec term-agent run "$goal" --steps 40 --permission-mode plan_only
+fi
 exec term-agent run "$goal" --steps 40 --allow-exec

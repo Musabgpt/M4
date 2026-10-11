@@ -14,6 +14,8 @@ import com.musabgpt.m4.artifacts.ArtifactRepository
 import com.musabgpt.m4.artifacts.ChatArtifact
 import com.musabgpt.m4.browser.BrowserPanel
 import com.musabgpt.m4.runtime.FilesPanel
+import com.musabgpt.m4.runtime.ChatEventStream
+import com.musabgpt.m4.runtime.RuntimeEvent
 import com.musabgpt.m4.scheduler.SchedulerPanel
 import com.musabgpt.m4.terminal.EmbeddedAlpineBackend
 import com.musabgpt.m4.terminal.TerminalPanel
@@ -33,12 +35,15 @@ class M4ChatActivity : ComponentActivity() {
                 val owner by vm.currentId.collectAsState()
                 var panel by rememberSaveable { mutableStateOf("chat") }
                 var attachments by remember { mutableStateOf(emptyList<ChatArtifact>()) }
+                var events by remember { mutableStateOf(emptyList<RuntimeEvent>()) }
+                LaunchedEffect(panel) { if (panel == "terminal") terminal.open() }
                 LaunchedEffect(owner) {
                     while (true) {
                         attachments = withContext(Dispatchers.IO) {
                             ArtifactRepository.importPublished(this@M4ChatActivity)
                             ArtifactRepository.list(this@M4ChatActivity, owner)
                         }
+                        events = withContext(Dispatchers.IO) { ChatEventStream.read(this@M4ChatActivity, owner) }
                         delay(1500)
                     }
                 }
@@ -46,9 +51,9 @@ class M4ChatActivity : ComponentActivity() {
                     Box(Modifier.weight(1f)) {
                         when (panel) {
                             "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
-                                runAgent = { goal -> terminal.runAgent(goal, owner); panel = "terminal" },
+                                runAgent = { goal -> vm.recordTerminalRequest(goal); terminal.runAgent(goal, owner); panel = "terminal" },
                                 readAgentProgress = { AgentProgressStore.read(this@M4ChatActivity) },
-                                artifacts = attachments, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, vm = vm)
+                                artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, vm = vm)
                             "terminal" -> TerminalPanel(terminal)
                             "files" -> FilesPanel()
                             "tasks" -> SchedulerPanel(owner)

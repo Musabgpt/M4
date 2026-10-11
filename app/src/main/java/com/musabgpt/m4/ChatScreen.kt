@@ -51,6 +51,8 @@ import kotlinx.coroutines.launch
 import java.util.Calendar
 import com.musabgpt.m4.artifacts.ArtifactChatCard
 import com.musabgpt.m4.artifacts.ChatArtifact
+import com.musabgpt.m4.runtime.RuntimeEvent
+import com.musabgpt.m4.runtime.InteractiveToolCard
 
 private val Clay = Color(0xFFD97757)
 
@@ -82,7 +84,9 @@ fun ChatTheme(content: @Composable () -> Unit) {
             onPrimary = Color.White
         )
     }
-    MaterialTheme(colorScheme = scheme, content = content)
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        MaterialTheme(colorScheme = scheme, content = content)
+    }
 }
 
 private fun greeting(): String {
@@ -97,6 +101,7 @@ fun ChatScreen(
     runAgent: (String) -> Unit,
     readAgentProgress: () -> AgentProgress?,
     artifacts: List<ChatArtifact> = emptyList(),
+    runtimeEvents: List<RuntimeEvent> = emptyList(),
     executeCommand: (String) -> Unit = {},
     vm: ChatViewModel = viewModel()
 ) {
@@ -106,6 +111,7 @@ fun ChatScreen(
     val providers by vm.providers.collectAsState()
     val providerIndex by vm.providerIndex.collectAsState()
     val activeRoute by vm.activeRoute.collectAsState()
+    val permissionMode by vm.permissionMode.collectAsState()
     val provider = providers[providerIndex.coerceIn(providers.indices)]
     val current = conversations.firstOrNull { it.id == currentId } ?: conversations.first()
 
@@ -123,7 +129,8 @@ fun ChatScreen(
         AlertDialog(
             onDismissRequest = { showAgentConfirm = false },
             title = { Text("تنفيذ المهمة في الطرفية العربية") },
-            text = { Text("سيعمل وكيل M4 على ملفات المشروع باستخدام Alpine المدمجة. قد ينفذ أوامر تغيّر الملفات؛ راجع المشروع واحفظ نسخك المهمة.") },
+            text = { Text(if (permissionMode == "plan_only") "سيقرأ وكيل M4 المشروع ويعد خطة؛ أدوات التعديل والتنفيذ محظورة في هذا الوضع."
+                else "سيعمل وكيل M4 على ملفات المشروع باستخدام Alpine المدمجة. قد ينفذ أوامر تغيّر الملفات؛ راجع المشروع واحفظ نسخك المهمة.") },
             confirmButton = {
                 TextButton(onClick = {
                     showAgentConfirm = false
@@ -292,6 +299,9 @@ fun ChatScreen(
                             Spacer(Modifier.width(4.dp))
                             Text("تنفيذ كود")
                         }
+                        TextButton(onClick = { vm.setPlanMode(permissionMode != "plan_only") }) {
+                            Text(if (permissionMode == "plan_only") "تخطيط" else "تنفيذ")
+                        }
                     }
                     InputBar(
                         text = input,
@@ -309,7 +319,7 @@ fun ChatScreen(
                 }
             }
         ) { padding ->
-            if (current.messages.isEmpty() && artifacts.isEmpty()) {
+            if (current.messages.isEmpty() && artifacts.isEmpty() && runtimeEvents.isEmpty()) {
                 Column(
                     modifier = Modifier.padding(padding).fillMaxSize().padding(32.dp),
                     verticalArrangement = Arrangement.Center,
@@ -340,6 +350,7 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
                     items(artifacts.reversed(), key = { "artifact-" + it.id }) { artifact -> ArtifactChatCard(artifact) }
+                    items(runtimeEvents.reversed(), key = { "event-" + it.id }) { event -> InteractiveToolCard(event) }
                     items(current.messages.reversed(), key = { it.id }) { msg ->
                         MessageRow(
                             msg = msg,

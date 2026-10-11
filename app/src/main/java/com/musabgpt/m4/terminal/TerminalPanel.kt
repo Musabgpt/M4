@@ -15,12 +15,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.viewinterop.AndroidView
 
 @Composable
 fun TerminalPanel(backend: EmbeddedAlpineBackend) {
     val state by backend.state.collectAsState()
     var input by remember { mutableStateOf("") }
+    val outputScroll = rememberScrollState()
+    var follow by remember { mutableStateOf(true) }
+    LaunchedEffect(state.frame?.text, follow) {
+        if (follow) { kotlinx.coroutines.delay(16); outputScroll.scrollTo(outputScroll.maxValue) }
+    }
     Column(Modifier.fillMaxSize().padding(8.dp)) {
         Text(state.status, style = MaterialTheme.typography.labelMedium)
         Row(Modifier.horizontalScroll(rememberScrollState())) {
@@ -32,8 +39,9 @@ fun TerminalPanel(backend: EmbeddedAlpineBackend) {
             TextButton(onClick = backend::newSession, enabled = !state.preparing) { Text("جلسة +") }
             TextButton(onClick = backend::interrupt, enabled = state.selected != null) { Text("مقاطعة") }
             TextButton(onClick = backend::closeSession, enabled = state.selected != null) { Text("إنهاء") }
+            TextButton(onClick = { follow = !follow }) { Text(if (follow) "تثبيت العرض" else "متابعة المخرج") }
         }
-        Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState())) {
+        Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(outputScroll).horizontalScroll(rememberScrollState())) {
             AndroidView(factory = { context ->
                 TextView(context).apply {
                     typeface = Typeface.MONOSPACE
@@ -58,6 +66,8 @@ fun TerminalPanel(backend: EmbeddedAlpineBackend) {
                         text.setSpan(BackgroundColorSpan(frame.background[start]), start - offset, end - offset, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                         start = end
                     }
+                    val cursor = frame.cursorIndex - offset
+                    if (cursor in 0 until text.length) text.setSpan(BackgroundColorSpan(0xFFB1C3D5.toInt()), cursor, cursor + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 }
                 view.text = text
             })
@@ -68,7 +78,7 @@ fun TerminalPanel(backend: EmbeddedAlpineBackend) {
             }
         }
         Row {
-            OutlinedTextField(value = input, onValueChange = { input = it }, label = { Text("أمر أو إدخال REPL") }, modifier = Modifier.weight(1f))
+            OutlinedTextField(value = input, onValueChange = { input = it }, label = { Text("أمر أو إدخال REPL") }, textStyle = TextStyle(textDirection = TextDirection.Ltr), modifier = Modifier.weight(1f))
             TextButton(onClick = { backend.execute(input); input = "" }, enabled = input.isNotBlank() && !state.preparing) { Text("إرسال") }
         }
     }

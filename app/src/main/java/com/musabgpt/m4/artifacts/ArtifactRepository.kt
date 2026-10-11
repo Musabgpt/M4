@@ -54,7 +54,7 @@ object ArtifactRepository {
     fun importPublished(context: Context) {
         val sourceRoot = File(LinuxEnvironment.rootfs(context), "root/projects/M4/.term-agent/artifacts")
         if (!sourceRoot.isDirectory) return
-        sourceRoot.listFiles().orEmpty().take(300).forEach { directory ->
+        sourceRoot.listFiles().orEmpty().sortedByDescending { it.lastModified() }.take(300).forEach { directory ->
             try {
                 if (!identifier.matches(directory.name) || directory.canonicalFile.parentFile != sourceRoot.canonicalFile) return@forEach
                 val manifest = File(directory, "manifest.json")
@@ -63,12 +63,13 @@ object ArtifactRepository {
                 if (!obj.optBoolean("published")) return@forEach
                 val row = decode(obj)
                 if (row.id != directory.name || !validName(row.name) || row.size !in 1..MAX_BYTES) return@forEach
+                val targetDirectory = File(root(context), row.id)
+                if (File(targetDirectory, "manifest.json").isFile) return@forEach
                 val source = File(directory, row.name)
                 if (source.canonicalFile.parentFile != directory.canonicalFile || !source.isFile ||
                     source.length() != row.size || hash(source) != row.sha256) return@forEach
-                val targetDirectory = File(root(context), row.id).apply { mkdirs() }
+                targetDirectory.mkdirs()
                 val target = File(targetDirectory, row.name)
-                if (File(targetDirectory, "manifest.json").isFile) return@forEach
                 validateFormat(source, row.mime)
                 val temporary = File(targetDirectory, ".import.tmp")
                 source.copyTo(temporary, overwrite = true)
@@ -177,7 +178,7 @@ object ArtifactRepository {
                 while (end < layout.lineCount && layout.getLineBottom(end) - top <= 762) end++
                 val page = pdf.startPage(PdfDocument.PageInfo.Builder(595, 842, pageNumber).create())
                 page.canvas.save()
-                page.canvas.clipRect(40, 40, 555, 802)
+                page.canvas.clipRect(40, 40, 555, 40 + layout.getLineTop(end) - top)
                 page.canvas.translate(40f, 40f - top)
                 layout.draw(page.canvas)
                 page.canvas.restore()

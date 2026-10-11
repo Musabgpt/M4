@@ -62,6 +62,9 @@ class TaskDatabase private constructor(context: Context) : SQLiteOpenHelper(cont
                     if (now - lock.getLong(1) < 180000) return null
                     db.execSQL("UPDATE task_runs SET status='interrupted',ended=? WHERE id=?", arrayOf(now, lock.getString(0)))
                     db.delete("execution_locks", "task_id=?", arrayOf(task.id))
+                    setState(task.id, false, "interrupted")
+                    db.setTransactionSuccessful()
+                    return null
                 }
             }
             db.rawQuery("SELECT id FROM task_runs WHERE idempotency_key=?", arrayOf(key)).use { if (it.moveToFirst()) return null }
@@ -89,9 +92,7 @@ class TaskDatabase private constructor(context: Context) : SQLiteOpenHelper(cont
             val enabled = find(task.id)?.enabled == true
             if (task.type == "once") setState(task.id, false, result.status)
             else {
-                val interval = if (task.type == "hourly") 3600000L else 86400000L
-                var next = task.nextRun
-                while (next <= System.currentTimeMillis()) next += interval
+                val next = TaskTiming.next(task.type, task.nextRun, System.currentTimeMillis(), task.timezone)
                 db.update("scheduled_tasks", ContentValues().apply { put("next_run", next)
                     put("state", if (enabled) "scheduled" else "paused") }, "id=?", arrayOf(task.id))
             }
@@ -101,6 +102,16 @@ class TaskDatabase private constructor(context: Context) : SQLiteOpenHelper(cont
 
     fun lastRun(id: String): String = readableDatabase.rawQuery("SELECT status,started,ended,exit_code,stdout,stderr FROM task_runs WHERE task_id=? ORDER BY started DESC LIMIT 1", arrayOf(id)).use {
         if (!it.moveToFirst()) "لم تُنفذ المهمة بعد" else "${it.getString(0)} • exit_code=${if (it.isNull(3)) "غير متاح" else it.getInt(3)}\n${it.getString(4)}\n${it.getString(5)}"
+    }
+    fun delete(id: String) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.rawQuery("SELECT task_id FROM execution_locks WHERE task_id=?", arrayOf(id)).use { require(!it.moveToFirst()) { "انتظر انتهاء التشغيل قبل الحذف" } }
+            db.delete("task_runs", "task_id=?", arrayOf(id))
+            db.delete("scheduled_tasks", "id=?", arrayOf(id))
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
     }
     companion object {
         @Volatile private var instance: TaskDatabase? = null

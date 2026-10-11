@@ -17,7 +17,8 @@ from .registry import Registry, schema, tool
 S = schema("string")
 MODES = ("ask_always", "accept_edits", "plan_only", "auto_project")
 PROTECTED = ("android/signing-cert-sha256.txt", "scripts/build-signed-release.sh",
-             "app/src/main/AndroidManifest.xml", "android/PROTECTED_PATHS", ".github/")
+             "app/src/main/AndroidManifest.xml", "android/PROTECTED_PATHS", ".github/",
+             "agent/m4core/", "agent/agent.py")
 
 
 def child_environment():
@@ -144,7 +145,7 @@ class ToolRuntime:
         path = self.safe_path(root, value, write=write)
         relative = str(path.relative_to(root))
         parts = path.relative_to(root).parts
-        if any(part in {".env", ".env.local", ".ssh", ".aws", "credentials"} or
+        if any(part.startswith(".env") or part in {".ssh", ".aws", "credentials"} or
                part.endswith((".pem", ".key", ".keystore", ".jks")) or part.startswith("id_") for part in parts):
             raise ValueError("Secret-bearing files are not available to model tools")
         if write and any(relative == item or relative.startswith(item.rstrip("/") + "/") for item in PROTECTED):
@@ -262,6 +263,8 @@ class ToolRuntime:
         data = content.encode("utf-8")
         if len(data) > 500000 or "\0" in content:
             raise ValueError("Invalid write or file larger than 500KB")
+        if path.is_file() and path.read_bytes() == data:
+            return "Unchanged " + relative
         self.backup(self.state, path, relative)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(".m4-write-" + uuid.uuid4().hex)
@@ -323,13 +326,13 @@ class ToolRuntime:
         if not pattern or len(pattern) > 240:
             raise ValueError("Invalid literal search")
         path = self._path(self.root, args.get("path", "."))
-        argv = ["rg", "-F", "-n", "--max-count", "20", "--glob", "!.term-agent/**",
-                "--glob", "!.git/**", "--glob", "!.env*", "--glob", "!*.pem", "--glob", "!*.key",
-                "--glob", "!id_*", "-C", str(args.get("context", 0))]
+        argv = ["rg", "-F", "-n", "--max-count", "20", "-C", str(args.get("context", 0))]
         if args.get("ignore_case"):
             argv.append("-i")
         if args.get("glob"):
             argv += ["--glob", args["glob"]]
+        for excluded in (".term-agent/**", ".git/**", ".env*", "*.pem", "*.key", "*.jks", "*.keystore", "id_*", ".ssh/**", ".aws/**", "credentials"):
+            argv += ["--glob", "!" + excluded]
         result = subprocess.run(argv + ["--", pattern, str(path)], cwd=self.root,
                                 capture_output=True, text=True, timeout=20)
         if result.returncode not in (0, 1):

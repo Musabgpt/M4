@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 
 data class TerminalSnapshot(
     val status: String = "الطرفية جاهزة للفتح",
@@ -139,11 +140,14 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
             val families = listOf("freellmpool", "gpt4free", "free-llm-gateway", "free-llm-api")
             val directory = File(LinuxEnvironment.rootfs(context), "root/.m4-agent")
             directory.mkdirs()
-            val config = File(directory, "provider.env")
-            config.writeText("export M4_GATEWAY_FAMILY=${quote(families[index])}\nexport M4_OWNER_SESSION=${quote(owner)}\n")
+            val configName = "provider-" + UUID.randomUUID().toString() + ".env"
+            val config = File(directory, configName)
+            val mode = context.getSharedPreferences("m4_chats", 0).getString("permission_mode", "auto_project")
+                ?.takeIf { it in setOf("auto_project", "plan_only") } ?: "auto_project"
+            config.writeText("export M4_GATEWAY_FAMILY=${quote(families[index])}\nexport M4_OWNER_SESSION=${quote(owner)}\nexport M4_PERMISSION_MODE=${quote(mode)}\n")
             config.setReadable(false, false); config.setWritable(false, false)
             config.setReadable(true, true); config.setWritable(true, true)
-            current.write(session, "m4-agent-start ${quote(goal)}\n")
+            current.write(session, "M4_AGENT_PROVIDER_FILE=${quote("/root/.m4-agent/$configName")} m4-agent-start ${quote(goal)}\n")
         } catch (e: Exception) { failure(e.message) }
     }
 

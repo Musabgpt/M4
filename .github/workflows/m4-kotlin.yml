@@ -20,4 +20,4 @@ jobs:
         with:
           gradle-version: '8.13'
       - name: Compile Compose, Kotlin and Java (no Alpine download)
-        run: gradle --no-daemon :app:compileDebugKotlin :app:compileDebugJavaWithJavac --stacktrace
+        run: gradle --no-daemon :app:compileDebugKotlin :app:compileDebugJavaWithJavac :app:testDebugUnitTest --stacktrace

@@ -84,7 +84,7 @@ class V2RuntimeTests(unittest.TestCase):
         self.assertFalse((self.root / "a").exists())
 
     def test_protected_paths_and_secrets_are_unavailable(self):
-        for name in [".env", "secret.pem", "id_ed25519"]:
+        for name in [".env", ".env.production", "secret.pem", "id_ed25519"]:
             (self.root / name).write_text("private")
             with self.assertRaises(ValueError): self.read(name)
         with self.assertRaises(ValueError):
@@ -166,13 +166,14 @@ class V2RuntimeTests(unittest.TestCase):
         self.assertNotIn("ScheduleCreate", self.runtime.registry.entries)
         self.assertNotIn("BrowserObserve", self.runtime.registry.entries)
 
-    def test_three_identical_no_progress_actions_stop_loop(self):
+    def test_changing_call_ids_do_not_hide_a_no_progress_loop(self):
         (self.root / "README.md").write_text("same")
-        reply = {"tool_calls": [{"function": {"name": "Read", "arguments": '{"path":"README.md"}'}}]}
-        with patch.object(agent, "ask", return_value=reply):
+        def reply(*args):
+            return {"tool_calls": [{"id": "different-" + str(time.time_ns()), "function": {"name": "Read", "arguments": '{"path":"README.md"}'}}]}
+        with patch.object(agent, "ask", side_effect=reply):
             self.assertEqual(agent.loop(self.root, self.state, "Inspect repeatedly", 10, False), 3)
         result = agent.load(self.state / "state.json", {})
-        self.assertEqual(result["phase"], "stuck"); self.assertEqual(result["step"], 3)
+        self.assertEqual(result["phase"], "stuck"); self.assertEqual(result["step"], 6)
 
     def test_plan_finish_never_runs_independent_commands(self):
         reply = {"tool_calls": [{"function": {"name": "Finish", "arguments": '{"summary":"plan"}'}}]}
@@ -180,6 +181,52 @@ class V2RuntimeTests(unittest.TestCase):
             self.assertEqual(agent.loop(self.root, self.state, "Plan a change", 1, False, "plan_only"), 0)
         verify.assert_not_called()
         self.assertEqual(agent.load(self.state / "state.json", {})["phase"], "planned")
+
+    def test_concurrent_agent_is_blocked_before_state_changes(self):
+        import fcntl
+        with (self.state / "active.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertEqual(agent.loop(self.root, self.state, "must not start", 1, True), 4)
+            self.assertFalse((self.state / "state.json").exists())
+
+    def test_interrupt_persists_canceled_phase(self):
+        with patch.object(agent, "ask", side_effect=KeyboardInterrupt):
+            self.assertEqual(agent.loop(self.root, self.state, "cancel this", 1, True), 130)
+        self.assertEqual(agent.load(self.state / "state.json", {})["phase"], "canceled")
+
+    def test_reserved_manifest_name_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.call("ArtifactCreate", {"format": "json", "name": "manifest.json", "content": '{}'})
+
+    def test_grep_include_glob_cannot_override_secret_exclusions(self):
+        (self.root / ".env.production").write_text("CONFIDENTIAL=hidden")
+        self.assertNotIn("CONFIDENTIAL", self.call("Grep", {"pattern": "CONFIDENTIAL", "glob": ".env*"}))
+
+    def test_compaction_preserves_complete_tool_call_pairs_and_goal(self):
+        (self.root / "a.txt").write_text("\n".join(str(i) for i in range(20)))
+        dialogs = []
+        def reply(url, model, dialog):
+            snapshot = json.loads(json.dumps(dialog)); dialogs.append(snapshot)
+            pending = set()
+            for message in snapshot:
+                if message.get("role") == "assistant" and message.get("tool_calls"):
+                    self.assertFalse(pending)
+                    pending = {item["id"] for item in message["tool_calls"]}
+                if message.get("role") == "tool":
+                    self.assertIn(message["tool_call_id"], pending); pending.remove(message["tool_call_id"])
+            self.assertFalse(pending)
+            return {"tool_calls": [{"function": {"name": "Read", "arguments": json.dumps({"path": "a.txt", "offset": len(dialogs), "limit": 1})}}]}
+        with patch.object(agent, "ask", side_effect=reply):
+            self.assertEqual(agent.loop(self.root, self.state, "Keep the original goal", 12, False), 2)
+        self.assertTrue(any("Compacted observed task state" in str(message) for message in dialogs[-1]))
+        self.assertIn("Keep the original goal", str(dialogs[-1]))
+
+    def test_invalid_finish_arguments_cannot_claim_verification(self):
+        reply = {"tool_calls": [{"function": {"name": "Finish", "arguments": '{"summary":"pretend","success":true}'}}]}
+        with patch.object(agent, "ask", return_value=reply), patch.object(agent, "verify") as verify:
+            self.assertEqual(agent.loop(self.root, self.state, "Do real work", 1, True), 2)
+        verify.assert_not_called()
+        self.assertNotEqual(agent.load(self.state / "state.json", {})["phase"], "complete")
 
 
 if __name__ == "__main__": unittest.main()

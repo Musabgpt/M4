@@ -1,0 +1,8 @@
+# Runtime agent edits require human security review for these paths.
+android/PROTECTED_PATHS
+android/signing-cert-sha256.txt
+scripts/build-signed-release.sh
+app/src/main/AndroidManifest.xml
+.github/
+agent/m4core/
+agent/agent.py
