@@ -249,7 +249,7 @@ public final class MainActivity extends Activity {
         String[] names={"لينكس: جلسة جديدة","صدفة أندرويد","صلاحيات Root",
             "الجلسة السابقة","إغلاق الجلسة","تبديل وضع الإدخال",
             "صلاحيات التحكم بالهاتف","استيراد ملف","تصدير مشاريع /root","استعادة ZIP إلى /root","نسخ الشاشة","لصق الحافظة",
-            "نسخ الأمر المكتوب","تحديث العرض","إدارة حزم Alpine","مساعدة","🤖 وكيل البرمجة"};
+            "نسخ الأمر المكتوب","تحديث العرض","إدارة حزم Alpine","مساعدة","🤖 وكيل البرمجة","محادثة M4 MusabAI"};
         for(int i=0;i<names.length;i++)popup.getMenu().add(0,i+1,i,names[i]);
         popup.setOnMenuItemClickListener(item->{
             switch(item.getItemId()){
@@ -275,6 +275,7 @@ public final class MainActivity extends Activity {
                 case 15:openPackageManager();break;
                 case 16:help();break;
                 case 17:openAgentMenu();break;
+                case 18:startActivity(new Intent(this,com.musabgpt.m4.M4ChatActivity.class));break;
                 default:return false;
             }
             return true;
