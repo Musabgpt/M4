@@ -12,7 +12,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.musabgpt.m4.ChatViewModel
 import com.musabgpt.m4.terminal.TermuxClient
-import io.musab.arabicterminal.LinuxEnvironment
 import io.musab.arabicterminal.UiControlService
 import org.json.JSONArray
 import org.json.JSONObject
@@ -26,11 +25,11 @@ import org.json.JSONObject
     fun command(text: String) { vm.send(text); showChat() }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("الأدوات والقدرات", style = MaterialTheme.typography.titleLarge)
-        Text("الطرفية: " + if (LinuxEnvironment.installed(context)) "مثبتة" else "تُجهّز عند أول تشغيل")
+        Text("المحرك: Termux المثبت على الهاتف فقط")
         Text("التحكم بالهاتف: " + if (UiControlService.current() != null) "الخدمة مفعلة" else "غير مفعل")
         TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text("إعدادات التحكم بالهاتف") }
         Row { TextButton(onClick = { command("/phone apps") }) { Text("التطبيقات المثبتة") }; TextButton(onClick = { command("/phone screen") }) { Text("قراءة الشاشة") } }
-        Text("Termux (اختياري)", style = MaterialTheme.typography.titleMedium)
+        Text("Termux — المحرك الأساسي", style = MaterialTheme.typography.titleMedium)
         Text(TermuxClient.status(context).toString())
         OutlinedTextField(executable, { executable = it }, label = { Text("اسم البرنامج") })
         OutlinedTextField(arguments, { arguments = it }, label = { Text("وسائط البرنامج كـ JSON array") }, modifier = Modifier.fillMaxWidth())
