@@ -2,6 +2,7 @@ package com.musabgpt.m4
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
@@ -55,6 +56,7 @@ class M4ChatActivity : ComponentActivity() {
                 val requestedPanel by vm.requestedPanel.collectAsState()
                 LaunchedEffect(requestedPanel) { requestedPanel?.let { panel = it; vm.consumedPanel() } }
                 browser.onNavigate = { panel = "browser" }
+                BackHandler(enabled = panel != "chat") { panel = "chat" }
                 var attachments by remember { mutableStateOf(emptyList<ChatArtifact>()) }
                 var events by remember { mutableStateOf(emptyList<RuntimeEvent>()) }
                 var eventLimit by remember(owner) { mutableStateOf(100) }
@@ -72,8 +74,16 @@ class M4ChatActivity : ComponentActivity() {
                 Column(Modifier.fillMaxSize().navigationBarsPadding()) {
                     Box(Modifier.weight(1f)) {
                         BrowserPanel(browser)
-                        if (panel != "browser") Surface(Modifier.fillMaxSize()) { when (panel) {
-                            "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
+                        if (panel != "browser") Surface(Modifier.fillMaxSize()) {
+                            Column {
+                                if (panel != "chat") {
+                                    Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                        TextButton(onClick = { panel = "chat" }) { Text("→ المحادثة") }
+                                        Text("M4", style = MaterialTheme.typography.titleMedium)
+                                    }
+                                }
+                                Box(Modifier.weight(1f)) { when (panel) {
+                            "chat" -> ChatScreen(openTerminal = { terminal.open() }, openPanel = { target -> panel = target },
                                 runAgent = { goal -> vm.send(goal) },
                                 readAgentProgress = { AgentProgressStore.read(this@M4ChatActivity) },
                                 artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, loadOlderEvents = { eventLimit = (eventLimit + 200).coerceAtMost(5000) }, vm = vm)
@@ -83,12 +93,6 @@ class M4ChatActivity : ComponentActivity() {
                             "github" -> com.musabgpt.m4.github.GitHubPanel(owner)
                             "tools" -> com.musabgpt.m4.runtime.ToolsPanel(vm) { panel = "chat" }
                         } }
-                    }
-                    HorizontalDivider()
-                    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        listOf("chat" to "محادثة", "terminal" to "طرفية", "files" to "ملفات", "tasks" to "مهام", "browser" to "متصفح", "github" to "GitHub", "tools" to "أدوات").forEach { (key, label) ->
-                            TextButton(onClick = { panel = key; if (key == "terminal") terminal.open() }) {
-                                Text((if (panel == key) "● " else "") + label)
                             }
                         }
                     }
