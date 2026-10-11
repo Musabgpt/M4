@@ -242,11 +242,40 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (clean == "/doctor") {
             val status = com.musabgpt.m4.terminal.TermuxClient.status(getApplication())
             val message = "Termux: " + (if (status.optBoolean("installed")) "مثبت" else "غير مثبت") +
-                "\\nصلاحية RUN_COMMAND: " + (if (status.optBoolean("permission_granted")) "ممنوحة" else "مطلوبة") +
-                "\\nالوكيل: NewAl Code عبر Termux فقط. لا يوجد تشغيل احتياطي عبر الطرفية العربية."
+                "\nصلاحية RUN_COMMAND: " + (if (status.optBoolean("permission_granted")) "ممنوحة" else "مطلوبة") +
+                "\nالوكيل: NewAl Code عبر Termux فقط. لا يوجد تشغيل احتياطي عبر الطرفية العربية."
             edit(_currentId.value) { c -> c.copy(messages = c.messages +
                 UiMessage(role = "user", content = clean) + UiMessage(role = "assistant", content = message)) }
             saveHistory()
+            return
+        }
+        if (clean == "/setup") {
+            val owner = _currentId.value
+            val answer = UiMessage(role = "assistant", content =
+                "جارٍ تجهيز وكيل NewAl داخل Termux. سيتم إنشاء المفتاح محلياً وتنزيل الملفات من مستودعك...")
+            edit(owner) { conv -> conv.copy(messages = conv.messages +
+                UiMessage(role = "user", content = clean) + answer) }
+            saveHistory()
+            _streaming.value = true
+            job = viewModelScope.launch {
+                try {
+                    val result = com.musabgpt.m4.terminal.NewAlTermuxBridge.setup(
+                        getApplication(), owner
+                    )
+                    edit(owner) { conv -> conv.copy(messages = conv.messages.map {
+                        if (it.id == answer.id) it.copy(content = result.optString("content",
+                            "تعذّر تجهيز وكيل NewAl")) else it
+                    }) }
+                } catch (_: Exception) {
+                    edit(owner) { conv -> conv.copy(messages = conv.messages.map {
+                        if (it.id == answer.id) it.copy(content =
+                            "فشل التجهيز؛ تأكد من الإنترنت وصلاحية Termux ثم جرّب مجدداً.") else it
+                    }) }
+                } finally {
+                    _streaming.value = false
+                    saveHistory()
+                }
+            }
             return
         }
         if (clean == "/export") { exportChat(); return }
@@ -337,7 +366,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 val artifacts = result.optJSONArray("artifacts")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("artifact_id")?.takeIf { id -> id.isNotBlank() } } } ?: emptyList()
                 val status = result.optString("status")
-                val content = result.optString("content", "لا توجد نتيجة مسجلة") + if (status in setOf("blocked", "failed", "canceled", "paused-step-limit")) "\nحالة المهمة المسجلة: $status" else ""
+                val content = result.optString("content", "لم يصل رد مؤكّد من المحرك.") +
+                    if (status in setOf("blocked", "failed", "canceled", "paused-step-limit"))
+                        "\nلم تكتمل المهمة." else ""
                 edit(convId) { c -> c.copy(messages = c.messages.map { if (it.id == reply.id) it.copy(content = content, attachments = artifacts) else it }) }
             } catch (cancel: CancellationException) {
                 edit(convId) { c ->
@@ -348,8 +379,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 edit(convId) { c ->
                     c.copy(messages = c.messages.map {
-                        if (it.id == reply.id) it.copy(content = it.content +
-                            "\nتعذر إكمال الرد: " + (e.message ?: "فشل الاتصال")) else it
+                        if (it.id == reply.id) it.copy(content = "تعذّر إكمال الرد. فحص المحرك /doctor يوضّح حالة Termux.")) else it
                     })
                 }
             } finally {
