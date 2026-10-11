@@ -40,6 +40,8 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
     private var pendingCommand: String? = null
     private var chatSession: TerminalService.Session? = null
     private var activeTurn: String? = null
+    private var initialized = kotlinx.coroutines.CompletableDeferred<Unit>()
+    private var preparing = false
     private val mutable = MutableStateFlow(TerminalSnapshot())
     val state = mutable.asStateFlow()
     private val observer = Runnable { refresh() }
@@ -60,8 +62,9 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
     }
 
     fun open() {
-        if (bound) { ready(); return }
+        if (bound) { if (initialized.isCancelled) { initialized = kotlinx.coroutines.CompletableDeferred(); prepare() }; return }
         if (binding) return
+        initialized = kotlinx.coroutines.CompletableDeferred()
         try {
             val intent = Intent(context, TerminalService::class.java)
             context.startForegroundService(intent)
@@ -72,12 +75,19 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
     }
 
     private fun prepare() {
+        if (preparing) return
+        preparing = true
         mutable.value = mutable.value.copy(status = "جارٍ تجهيز Alpine المدمجة", preparing = true)
         scope.launch {
             try {
-                withContext(Dispatchers.IO) { LinuxEnvironment.install(context.applicationContext) }
-                if (service == null) return@launch
+                withContext(Dispatchers.IO) {
+                    LinuxEnvironment.install(context.applicationContext)
+                    io.musab.arabicterminal.ProjectBootstrap.ensure(LinuxEnvironment.rootfs(context))
+                }
+                if (service == null) error("انقطع اتصال الطرفية أثناء التجهيز")
                 if (service?.sessions()?.none { it.isLinux && !it.isFinished } == true) service?.create(false, true, 24, 80)
+                preparing = false
+                initialized.complete(Unit)
                 ready()
             } catch (e: Exception) { failure(e.message) }
             catch (e: LinkageError) { failure(e.message) }
@@ -104,11 +114,13 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
                 selected.isFinished -> "انتهت جلسة PTY"
                 selected.isLinux -> "Alpine • PRoot • PTY حي"
                 else -> "جلسة أندرويد" },
-            sessions = current.sessions().toList(), selected = selected, frame = selected?.frame()
+            sessions = current.sessions().toList(), selected = selected, frame = selected?.frame(), preparing = preparing
         )
     }
 
     private fun failure(message: String?) {
+        preparing = false
+        initialized.completeExceptionally(java.io.IOException(message ?: "تعذر تجهيز الطرفية"))
         mutable.value = mutable.value.copy(status = "تعذرت الطرفية: ${message ?: "خطأ غير معروف"}", preparing = false)
         pendingGoal = null
         pendingCommand = null
@@ -156,7 +168,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
         require(family in setOf("freellmpool", "gpt4free", "free-llm-gateway", "free-llm-api"))
         require(mode in setOf("auto_project", "plan_only", "ask_always", "accept_edits"))
         open()
-        withTimeout(120000) { state.first { !it.preparing && (it.sessions.isNotEmpty() || it.status.startsWith("تعذرت")) } }
+        withTimeout(120000) { initialized.await() }
         val current = service ?: error("لم تتصل خدمة الطرفية")
         require(LinuxEnvironment.installed(context)) { state.value.status }
         val owner = request.getString("owner_session_id")

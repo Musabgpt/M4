@@ -8,10 +8,12 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+import os
 
 assets,libs=map(Path,sys.argv[1:3])
 ALPINE_VERSION="3.24.2"
-ALPINE_BASE="https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64"
+ARCH = {"arm64-v8a": "aarch64", "x86_64": "x86_64"}[os.environ.get("M4_RUNTIME_ABI", "arm64-v8a")]
+ALPINE_BASE=f"https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/{ARCH}"
 TERMUX="https://packages.termux.dev/apt/termux-main"
 def get(url):
     req=urllib.request.Request(url,headers={"User-Agent":"MusabArabicTerminal/0.5"})
@@ -21,7 +23,7 @@ def verify(data,checksum,filename):
     actual=hashlib.sha256(data).hexdigest()
     if actual.lower()!=checksum.lower():
         raise ValueError("SHA256 mismatch "+filename)
-filename=f"alpine-minirootfs-{ALPINE_VERSION}-aarch64.tar.gz"
+filename=f"alpine-minirootfs-{ALPINE_VERSION}-{ARCH}.tar.gz"
 archive=get(f"{ALPINE_BASE}/{filename}")
 sha=get(f"{ALPINE_BASE}/{filename}.sha256").decode().split()[0]
 verify(archive,sha,filename)
@@ -35,7 +37,7 @@ import urllib.error
 index=None
 for extension in ("Packages.xz","Packages.gz","Packages"):
     try:
-        packages=get(f"{TERMUX}/dists/stable/main/binary-aarch64/{extension}")
+        packages=get(f"{TERMUX}/dists/stable/main/binary-{ARCH}/{extension}")
         if extension.endswith(".xz"):
             index=lzma.decompress(packages).decode()
         elif extension.endswith(".gz"):

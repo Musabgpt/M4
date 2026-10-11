@@ -69,7 +69,7 @@ class M4ChatActivity : ComponentActivity() {
                         delay(1500)
                     }
                 }
-                Column(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().navigationBarsPadding()) {
                     Box(Modifier.weight(1f)) {
                         BrowserPanel(browser)
                         if (panel != "browser") Surface(Modifier.fillMaxSize()) { when (panel) {

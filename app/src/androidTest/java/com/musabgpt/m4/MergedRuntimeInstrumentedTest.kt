@@ -19,13 +19,51 @@ import org.junit.Assert.*
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.UUID
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performClick
 
 @RunWith(AndroidJUnit4::class)
 class MergedRuntimeInstrumentedTest {
-    @get:Rule val activity = ActivityTestRule(M4ChatActivity::class.java)
+    @get:Rule val activity = createAndroidComposeRule<M4ChatActivity>()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val owner = "qa-" + UUID.randomUUID().toString()
     private fun evidence(name: String, text: String) { File(context.filesDir, "qa").apply { mkdirs() }.resolve(name).writeText(text) }
+
+    @Test fun firstMessageUsesRealPackagedPythonThroughTheVisibleSendButton() {
+        // Only the external model is replaced. Installation, checkout, native
+        // PTY/PRoot, packaged Python, request/events/response and UI are real.
+        val server = java.net.ServerSocket(1337, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        server.soTimeout = 180000
+        val received = java.util.concurrent.atomic.AtomicReference<String>()
+        val fixture = Thread {
+            runCatching { server.accept().use { socket ->
+                socket.soTimeout = 15000
+                val input = java.io.DataInputStream(socket.getInputStream())
+                var length = 0
+                while (true) { val line = input.readLine() ?: break; if (line.isEmpty()) break; if (line.startsWith("Content-Length:", true)) length = line.substringAfter(':').trim().toInt() }
+                require(length in 1..1000000)
+                val bytes = ByteArray(length); input.readFully(bytes); received.set(String(bytes, Charsets.UTF_8))
+                val body = """{"model":"qa-protocol-fixture","choices":[{"message":{"role":"assistant","content":"مرحباً، المحادثة جاهزة."}}]}""".toByteArray(Charsets.UTF_8)
+                val output = socket.getOutputStream()
+                output.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray()); output.write(body); output.flush()
+            } }
+        }.apply { isDaemon = true; start() }
+        lateinit var vm: ChatViewModel
+        activity.runOnIdle { vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]; vm.newChat(); vm.selectProvider(1) }
+        try {
+            activity.onNodeWithTag("chat-input").performTextInput("مرحبا")
+            activity.onNodeWithTag("chat-send").performClick()
+            activity.waitUntil(180000) { !vm.streaming.value && vm.conversations.value.first { it.id == vm.currentId.value }.messages.any { it.role == "assistant" } }
+            val messages = vm.conversations.value.first { it.id == vm.currentId.value }.messages
+            val reply = messages.last { it.role == "assistant" }.content
+            evidence("first-message.json", JSONObject().put("reply", reply).put("runtime", vm.terminal.state.value.status).put("model_request_received", received.get() != null).toString(2))
+            assertEquals("مرحباً، المحادثة جاهزة.", reply)
+            assertTrue(received.get().contains("مرحبا"))
+            assertTrue(File(LinuxEnvironment.rootfs(context), "root/projects/M4/.git").isDirectory)
+        } finally { server.close(); fixture.join(1000) }
+    }
 
     @Test fun ownedHtmlIsClickedTypedAssertedAndCaptured() {
         val html = """<!doctype html><html lang="ar" dir="rtl"><style>body{background:white;color:black;font-size:24px}button,input{font-size:24px}</style><h1>اختبار M4</h1><input id="name"><button id="go" onclick="document.querySelector('#result').innerText='مرحبا '+document.querySelector('#name').value">تشغيل</button><p id="result">انتظار</p></html>"""

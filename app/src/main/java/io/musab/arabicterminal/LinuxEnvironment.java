@@ -26,7 +26,7 @@ public final class LinuxEnvironment {
             && new File(root,"bin/busybox").exists();
     }
     public static boolean runtimeAvailable(Context c){
-        if(!"arm64-v8a".equals(Build.SUPPORTED_ABIS[0]))return false;
+        if(!BuildConfig.RUNTIME_ABI.equals(Build.SUPPORTED_ABIS[0]))return false;
         File libs=new File(c.getApplicationInfo().nativeLibraryDir);
         return new File(libs,"libproot.so").isFile() &&
             new File(libs,"libproot-loader.so").isFile();

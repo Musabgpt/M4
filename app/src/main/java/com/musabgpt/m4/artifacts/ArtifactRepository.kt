@@ -174,8 +174,7 @@ object ArtifactRepository {
     }
 
     fun syncImports(context: Context, owner: String) {
-        val project = File(LinuxEnvironment.rootfs(context), "root/projects/M4")
-        require(File(project, ".git").isDirectory) { "المشروع لم يُجهز بعد" }
+        val project = io.musab.arabicterminal.ProjectBootstrap.ensure(LinuxEnvironment.rootfs(context))
         list(context, owner).takeLast(100).forEach { row ->
             val target = File(project, ".m4/imports/${row.id}/${row.name}")
             target.parentFile!!.mkdirs()

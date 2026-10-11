@@ -8,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -396,7 +397,7 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
                     items(artifacts.reversed(), key = { "artifact-" + it.id }) { artifact -> ArtifactChatCard(artifact) }
-                    item { TextButton(onClick = loadOlderEvents) { Text("تحميل سجل أقدم") } }
+                    if (runtimeEvents.size >= 100) item { TextButton(onClick = loadOlderEvents) { Text("تحميل سجل أقدم") } }
                     items(runtimeEvents.filter { it.kind in setOf("tool_started", "tool_finished", "turn_finished", "notice", "hook_error", "provider_fallback", "provider_route") }.groupBy { if (it.callId.isNotBlank()) "call-${it.turn}-${it.callId}" else "event-${it.id}" }.values.map { it.last() }.sortedByDescending { it.time }, key = { "event-" + it.id }) { event -> InteractiveToolCard(event) }
                     items(current.messages.reversed(), key = { it.id }) { msg ->
                         MessageRow(
@@ -456,11 +457,17 @@ private fun MessageActions(msg: UiMessage, vm: ChatViewModel) {
     var editing by remember { mutableStateOf(false) }
     var edited by remember(msg.id) { mutableStateOf(msg.content) }
     var rewind by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
     Row(Modifier.horizontalScroll(rememberScrollState())) {
         CopyAction(msg.content)
-        TextButton(onClick = { vm.fork(msg.id) }) { Text("فرع من هنا") }
-        if (msg.role == "user") TextButton(onClick = { editing = true }) { Text("تعديل وإعادة") }
-        if (msg.turnId.isNotBlank()) TextButton(onClick = { rewind = true }) { Text("تراجع") }
+        Box {
+            TextButton(onClick = { menu = true }) { Text("خيارات") }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("فرع من هنا") }, onClick = { menu = false; vm.fork(msg.id) })
+                if (msg.role == "user") DropdownMenuItem(text = { Text("تعديل وإعادة الإرسال") }, onClick = { menu = false; editing = true })
+                if (msg.turnId.isNotBlank()) DropdownMenuItem(text = { Text("استرجاع الملفات والمحادثة") }, onClick = { menu = false; rewind = true })
+            }
+        }
     }
     if (editing) AlertDialog(onDismissRequest = { editing = false }, title = { Text("تعديل الرسالة في فرع جديد") }, text = { OutlinedTextField(edited, { edited = it }, maxLines = 8) }, confirmButton = { TextButton(onClick = { vm.fork(msg.id, edited); editing = false }) { Text("إعادة الإرسال") } }, dismissButton = { TextButton(onClick = { editing = false }) { Text("إلغاء") } })
     if (rewind) AlertDialog(onDismissRequest = { rewind = false }, title = { Text("استرجاع الملفات والمحادثة") }, text = { Text("سيُسترجع محتوى الملفات قبل هذه الخطوة وتُلغى تعديلات خطواتك اللاحقة، ثم تُحذف رسائلها وما بعدها من المحادثة. يتوقف التراجع إذا تعارض ملف مع تعديل خارجي أو محادثة أخرى. الإجراءات خارج الملفات، مثل إرسال رسالة، لا يمكن استرجاعها.") }, confirmButton = { TextButton(onClick = { vm.rewind(msg.turnId); rewind = false }) { Text("استرجاع") } }, dismissButton = { TextButton(onClick = { rewind = false }) { Text("إلغاء") } })
@@ -599,7 +606,7 @@ private fun InputBar(
                     maxLines = 6,
                     textStyle = TextStyle(color = colors.onSurface, fontSize = 16.sp, lineHeight = 22.sp),
                     cursorBrush = SolidColor(Clay),
-                    modifier = Modifier.weight(1f).padding(vertical = 7.dp),
+                    modifier = Modifier.weight(1f).padding(vertical = 7.dp).testTag("chat-input"),
                     decorationBox = { inner ->
                         Box {
                             if (text.isEmpty()) {
@@ -615,6 +622,7 @@ private fun InputBar(
                         .size(36.dp)
                         .clip(CircleShape)
                         .background(if (canSend) Clay else Clay.copy(alpha = 0.35f))
+                        .testTag("chat-send")
                         .clickable(enabled = canSend) { if (isStreaming) onStop() else onSend() },
                     contentAlignment = Alignment.Center
                 ) {
