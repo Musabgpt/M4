@@ -9,7 +9,7 @@ data class CommandResult(val status: String, val exitCode: Int?, val stdout: Str
 
 /** Bounded batch execution in the same private rootfs. This is not an interactive PTY. */
 object AlpineCommandRunner {
-    fun run(context: Context, command: String, stopped: () -> Boolean, timeoutSeconds: Long = 120L): CommandResult {
+    fun run(context: Context, command: String, timeoutSeconds: Long = 120L, stopped: () -> Boolean): CommandResult {
         if (!LinuxEnvironment.installed(context) || !LinuxEnvironment.runtimeAvailable(context))
             return CommandResult("blocked", null, "", "Alpine المدمجة غير جاهزة؛ افتح الطرفية مرة واحدة")
         val libraries = context.applicationInfo.nativeLibraryDir
