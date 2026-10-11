@@ -142,6 +142,53 @@ class TermuxNewAlContractTest(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_generated_html_is_exported_without_sensitive_files(self):
+        import base64
+        with socket.socket() as port:
+            port.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try: port.bind(("127.0.0.1", 8791))
+            except OSError as error: self.skipTest(str(error))
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".newal-cloud").mkdir()
+            (home / ".newal-cloud/key").write_text("m4-test-session-key")
+            workspace = home / "projects" / "M4"
+            workspace.mkdir(parents=True)
+            html = "<!doctype html><html><body>Calculator</body></html>"
+            (workspace / "calculator.html").write_text(html, encoding="utf-8")
+            (workspace / "secret-token.json").write_text('{"key":"SHOULD_NOT_EXPORT"}')
+            session_package = home / ".newal-code" / "termux" / "app" / "newal_code"
+            session_package.mkdir(parents=True)
+            (session_package / "__init__.py").write_text("")
+            (session_package / "session.py").write_text(
+                "class Session:\n"
+                " @classmethod\n"
+                " def load(cls,sid): return cls()\n"
+                " def changes(self,turn):\n"
+                "  return [{'path':'calculator.html','status':'added'},"
+                "{'path':'secret-token.json','status':'added'}]\n")
+            state = {"send_calls":0,"mode_updates":0,"turn":5,
+                     "current":False,"message":""}
+            handler = type("FileExportFixture", (NewAlFixture,), {"state":state})
+            server = http.server.ThreadingHTTPServer(("127.0.0.1",8791),handler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                env = dict(os.environ, HOME=str(home))
+                call=[sys.executable,"-c",embedded_worker(),"test-owner",
+                      base64.b64encode("أنشئ حاسبة".encode()).decode(),"ask_always"]
+                result=subprocess.run(call,env=env,capture_output=True,text=True,timeout=12)
+                self.assertEqual(result.returncode,0,result.stderr)
+                payload=json.loads(result.stdout.strip())
+                self.assertEqual(payload["status"],"succeeded")
+                self.assertEqual([x["name"] for x in payload["files"]],["calculator.html"])
+                self.assertEqual(base64.b64decode(payload["files"][0]["content_b64"]).decode(),html)
+                self.assertNotIn("SHOULD_NOT_EXPORT",result.stdout)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     def test_authenticated_new_turn_never_returns_stale_receipt(self):
         with socket.socket() as check:
             check.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
