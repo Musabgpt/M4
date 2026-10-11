@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.musabgpt.m4.artifacts.ArtifactRepository
 import io.musab.arabicterminal.LinuxEnvironment
@@ -27,14 +28,14 @@ class EditorDocument(val file: File, initial: String, initialHash: String) {
     var hash by mutableStateOf(initialHash)
 }
 
-class WorkspaceEditorState {
+class WorkspaceEditorState : androidx.lifecycle.ViewModel() {
     val documents = mutableStateListOf<EditorDocument>()
     var active by mutableStateOf<EditorDocument?>(null)
 }
 
 /** Bounded project editor with a content-hash conflict check and private backups. */
 @Composable
-fun FilesPanel(state: WorkspaceEditorState = remember { WorkspaceEditorState() }) {
+fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compose.viewModel(), askAgent: (String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val root = remember { File(LinuxEnvironment.rootfs(context), "root/projects/M4") }
@@ -48,6 +49,8 @@ fun FilesPanel(state: WorkspaceEditorState = remember { WorkspaceEditorState() }
     var error by remember { mutableStateOf("") }
     var diff by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf("") }
+    var ask by remember { mutableStateOf(false) }
+    var instruction by remember { mutableStateOf("") }
     fun allowed(file: File): Boolean {
         val canonical = file.canonicalFile
         return canonical.toPath().startsWith(root.canonicalFile.toPath()) &&
@@ -81,10 +84,10 @@ fun FilesPanel(state: WorkspaceEditorState = remember { WorkspaceEditorState() }
                                 val text = withContext(Dispatchers.IO) {
                                     require(allowed(file) && file.length() <= 250000)
                                     val bytes = file.readBytes(); require(bytes.none { it == 0.toByte() })
-                                    bytes.toString(Charsets.UTF_8)
+                                    bytes.toString(Charsets.UTF_8) to java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
                                 }
                                 val existing = state.documents.firstOrNull { it.file == file }
-                                val opened = existing ?: EditorDocument(file, text, withContext(Dispatchers.IO) { ArtifactRepository.hash(file) }).also { state.documents.add(it) }
+                                val opened = existing ?: EditorDocument(file, text.first, text.second).also { state.documents.add(it) }
                                 state.active = opened; error = ""
                             } catch (e: Exception) { error = "تعذرت قراءة الملف: ${e.message}" }
                         }
@@ -94,7 +97,8 @@ fun FilesPanel(state: WorkspaceEditorState = remember { WorkspaceEditorState() }
         } else {
             Row {
                 TextButton(onClick = { state.active = null }) { Text("رجوع") }
-                TextButton(onClick = { diff = true }, enabled = original != content) { Text("مراجعة وحفظ") }
+                TextButton(onClick = { diff = true }, enabled = original != content) { Text("Review") }
+                TextButton(onClick = { ask = true }) { Text("Ask Agent") }
             }
             Row(Modifier.weight(1f).verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState())) {
                 Text((1..(content.count { it == '\n' } + 1)).joinToString("\n"),
@@ -103,7 +107,7 @@ fun FilesPanel(state: WorkspaceEditorState = remember { WorkspaceEditorState() }
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(content, { document?.content = it },
                     textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, lineHeight = 22.sp),
-                    modifier = Modifier.width(maxOf(700, (content.lineSequence().maxOfOrNull { it.length } ?: 0).coerceAtMost(500) * 9).dp),
+                    modifier = Modifier.testTag("code-editor").width(maxOf(700, (content.lineSequence().maxOfOrNull { it.length } ?: 0).coerceAtMost(500) * 9).dp),
                     placeholder = { Text("Write code…") })
             }
             Row {
@@ -112,6 +116,12 @@ fun FilesPanel(state: WorkspaceEditorState = remember { WorkspaceEditorState() }
             }
         }
     }
+    if (ask) AlertDialog(onDismissRequest = { ask = false }, title = { Text("Ask about ${selected?.name.orEmpty()}") },
+        text = { OutlinedTextField(instruction, { instruction = it }, label = { Text("Instruction") }) },
+        confirmButton = { TextButton(enabled = instruction.isNotBlank(), onClick = {
+            askAgent("$instruction\n\nFile: ${selected?.toRelativeString(root)}\nCurrent editor buffer (may contain unsaved edits):\n```\n$content\n```")
+            ask = false; instruction = ""
+        }) { Text("Send with file context") } }, dismissButton = { TextButton(onClick = { ask = false }) { Text("Cancel") } })
     if (diff) AlertDialog(onDismissRequest = { diff = false }, title = { Text("مراجعة التعديل") },
         text = {
             Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState())) {
@@ -130,7 +140,7 @@ fun FilesPanel(state: WorkspaceEditorState = remember { WorkspaceEditorState() }
         },
         confirmButton = { TextButton(onClick = { scope.launch {
             try {
-                withContext(Dispatchers.IO) {
+                val savedHash = withContext(Dispatchers.IO) {
                     val file = requireNotNull(selected)
                     require(allowed(file) && ArtifactRepository.hash(file) == hash) { "تغير الملف؛ أعد قراءته قبل الحفظ" }
                     val relative = file.toRelativeString(root)
@@ -141,9 +151,9 @@ fun FilesPanel(state: WorkspaceEditorState = remember { WorkspaceEditorState() }
                     file.copyTo(File(backups, UUID.randomUUID().toString()))
                     val temp = File(file.parentFile, ".m4-editor-" + UUID.randomUUID())
                     temp.writeText(content); require(temp.renameTo(file))
-                    document?.hash = ArtifactRepository.hash(file)
+                    ArtifactRepository.hash(file)
                 }
-                document?.original = content; diff = false; error = ""
+                document?.hash = savedHash; document?.original = content; diff = false; error = ""
             } catch (e: Exception) { error = "تعذر حفظ الملف: ${e.message}"; diff = false }
         } }) { Text("حفظ مع نسخة احتياطية") } }, dismissButton = { TextButton(onClick = { diff = false }) { Text("إلغاء") } })
 }

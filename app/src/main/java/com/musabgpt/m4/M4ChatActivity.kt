@@ -38,7 +38,7 @@ class M4ChatActivity : ComponentActivity() {
             com.musabgpt.m4.runtime.WorkbenchTheme {
                 val vm: ChatViewModel = viewModel()
                 val terminal = vm.terminal
-                val editorState = remember { com.musabgpt.m4.runtime.WorkspaceEditorState() }
+                val editorState: com.musabgpt.m4.runtime.WorkspaceEditorState = viewModel()
                 val permissionRequest by com.musabgpt.m4.runtime.HostPermissionRequest.pending.collectAsState()
                 val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> com.musabgpt.m4.runtime.HostPermissionRequest.resolve(granted) }
                 LaunchedEffect(permissionRequest) { permissionRequest?.let { permissionLauncher.launch(it) } }
@@ -75,14 +75,14 @@ class M4ChatActivity : ComponentActivity() {
                     Box(Modifier.fillMaxSize()) {
                         BrowserPanel(browser)
                         if (panel != "browser") Surface(Modifier.fillMaxSize()) { when (panel) {
-                        "cursor" -> com.musabgpt.m4.runtime.FilesPanel(editorState)
+                        "cursor" -> com.musabgpt.m4.runtime.FilesPanel(editorState) { prompt -> vm.send(prompt); panel = "chat" }
                         "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
                                 runAgent = { goal -> vm.send(goal) },
                                 readAgentProgress = { AgentProgressStore.read(this@M4ChatActivity) },
                                 artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, loadOlderEvents = { eventLimit = (eventLimit + 200).coerceAtMost(5000) }, vm = vm)
                             "terminal" -> TerminalPanel(terminal)
                             "termux" -> TermuxPanel(owner)
-                            "files" -> FilesPanel(editorState)
+                            "files" -> FilesPanel(editorState) { prompt -> vm.send(prompt); panel = "chat" }
                             "tasks" -> SchedulerPanel(owner)
                             "github" -> com.musabgpt.m4.github.GitHubPanel(owner)
                             "gitlab" -> com.musabgpt.m4.github.GitLabPanel(owner)

@@ -10,6 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,7 +51,7 @@ fun WorkbenchShell(panel: String, open: (String) -> Unit, content: @Composable (
                 Row(Modifier.weight(1f)) {
                     Column(Modifier.width(76.dp).fillMaxHeight().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
                         destinations.filter { it.first !in setOf("termux", "gitlab", "tasks") }.forEach { (key, label) ->
-                            TextButton(onClick = { open(key) }, contentPadding = PaddingValues(4.dp), modifier = Modifier.fillMaxWidth().height(56.dp), colors = ButtonDefaults.textButtonColors(contentColor = if (panel == key) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)) {
+                            TextButton(onClick = { open(key) }, contentPadding = PaddingValues(4.dp), modifier = Modifier.fillMaxWidth().height(56.dp).testTag("workbench-$key"), colors = ButtonDefaults.textButtonColors(contentColor = if (panel == key) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)) {
                                 Text(label, fontSize = 11.sp, maxLines = 1)
                             }
                         }

@@ -49,3 +49,18 @@ The earlier NewAl-Cloud baseline package `dev.newal.code.lite` and standalone M4
 CI runs Python agent tests, Kotlin/Compose compilation, rootfs integrity and native build tests, and Android SDK/NDK debug APK construction. A successful CI build is not proof of on-device UX or free-route uptime. APK updates preserve old private files only when Android sees the **exact package and signer** match; M4's Linux runtime upgrades preserve user folders and task history. Signed release builds depend on the original private key, which cannot be retrieved from the public source repository or reconstructed from its certificate fingerprint.
 
 This distribution does not bundle local model weights, require root or ADB, give every gateway unauthorized access, or claim unlimited free service.
+
+## Android workbench interface
+
+The workbench now has a persistent dark frame, an activity rail, command navigation,
+searchable integration cards and file tabs. Open editor buffers survive switching
+between Agent and Explorer and Activity recreation through a ViewModel. Editing
+shows line numbers, a dirty marker and a line comparison before saving; saving
+checks the original content hash and keeps a backup. Ask Agent sends the current
+file buffer, including unsaved edits, with the user's instruction.
+
+This is an Android workbench implementation, not feature parity with Cursor.
+The editor does not yet provide a language server, syntax highlighting, inline
+AI completions or a VS Code extension host. Integration cards open the actual
+native connectors; they do not install arbitrary desktop extensions. Termux is
+optional and its installation still uses Android's normal installation flow.
