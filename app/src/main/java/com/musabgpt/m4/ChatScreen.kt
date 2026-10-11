@@ -105,6 +105,7 @@ fun ChatScreen(
     artifacts: List<ChatArtifact> = emptyList(),
     runtimeEvents: List<RuntimeEvent> = emptyList(),
     executeCommand: (String) -> Unit = {},
+    loadOlderEvents: () -> Unit = {},
     vm: ChatViewModel = viewModel()
 ) {
     val conversations by vm.conversations.collectAsState()
@@ -395,7 +396,8 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
                     items(artifacts.reversed(), key = { "artifact-" + it.id }) { artifact -> ArtifactChatCard(artifact) }
-                    items(runtimeEvents.reversed(), key = { "event-" + it.id }) { event -> InteractiveToolCard(event) }
+                    item { TextButton(onClick = loadOlderEvents) { Text("تحميل سجل أقدم") } }
+                    items(runtimeEvents.filter { it.kind in setOf("tool_started", "tool_finished", "turn_finished", "notice", "hook_error", "provider_fallback", "provider_route") }.groupBy { if (it.callId.isNotBlank()) "call-${it.turn}-${it.callId}" else "event-${it.id}" }.values.map { it.last() }.sortedByDescending { it.time }, key = { "event-" + it.id }) { event -> InteractiveToolCard(event) }
                     items(current.messages.reversed(), key = { it.id }) { msg ->
                         MessageRow(
                             msg = msg,
@@ -461,7 +463,7 @@ private fun MessageActions(msg: UiMessage, vm: ChatViewModel) {
         if (msg.turnId.isNotBlank()) TextButton(onClick = { rewind = true }) { Text("تراجع") }
     }
     if (editing) AlertDialog(onDismissRequest = { editing = false }, title = { Text("تعديل الرسالة في فرع جديد") }, text = { OutlinedTextField(edited, { edited = it }, maxLines = 8) }, confirmButton = { TextButton(onClick = { vm.fork(msg.id, edited); editing = false }) { Text("إعادة الإرسال") } }, dismissButton = { TextButton(onClick = { editing = false }) { Text("إلغاء") } })
-    if (rewind) AlertDialog(onDismissRequest = { rewind = false }, title = { Text("استرجاع الملفات والمحادثة") }, text = { Text("سيُسترجع محتوى ملفات هذه الخطوة قبل تعديلها، ثم تُحذف رسائلها وما بعدها من المحادثة. يتوقف التراجع إذا تغير ملف لاحقًا. الإجراءات خارج الملفات، مثل إرسال رسالة، لا يمكن استرجاعها.") }, confirmButton = { TextButton(onClick = { vm.rewind(msg.turnId); rewind = false }) { Text("استرجاع") } }, dismissButton = { TextButton(onClick = { rewind = false }) { Text("إلغاء") } })
+    if (rewind) AlertDialog(onDismissRequest = { rewind = false }, title = { Text("استرجاع الملفات والمحادثة") }, text = { Text("سيُسترجع محتوى الملفات قبل هذه الخطوة وتُلغى تعديلات خطواتك اللاحقة، ثم تُحذف رسائلها وما بعدها من المحادثة. يتوقف التراجع إذا تعارض ملف مع تعديل خارجي أو محادثة أخرى. الإجراءات خارج الملفات، مثل إرسال رسالة، لا يمكن استرجاعها.") }, confirmButton = { TextButton(onClick = { vm.rewind(msg.turnId); rewind = false }) { Text("استرجاع") } }, dismissButton = { TextButton(onClick = { rewind = false }) { Text("إلغاء") } })
 }
 
 @Composable

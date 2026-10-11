@@ -24,6 +24,8 @@ import kotlinx.coroutines.withContext
     var repository by remember { mutableStateOf("Musabgpt/M4") }
     var busy by remember { mutableStateOf(false) }
     var canceled by remember { mutableStateOf(false) }
+    var artifactId by remember { mutableStateOf("") }
+    var updateId by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("GitHub • M4 / NewAl", style = MaterialTheme.typography.titleLarge)
         Text(status, style = MaterialTheme.typography.bodySmall)
@@ -51,6 +53,20 @@ import kotlinx.coroutines.withContext
             try { status = withContext(Dispatchers.IO) { client.call("runs", org.json.JSONObject().put("repository", repository), owner).toString(2) } }
             catch (e: Exception) { status = e.message.orEmpty() }
         } }) { Text("قراءة نتائج Actions الفعلية") }
+        OutlinedTextField(artifactId, { artifactId = it }, label = { Text("رقم مرفق APK في Actions") })
+        TextButton(enabled = !busy && artifactId.toLongOrNull() != null, onClick = { busy = true; scope.launch {
+            try { val row = withContext(Dispatchers.IO) { client.call("artifact_download", org.json.JSONObject().put("repository", repository).put("id", artifactId.toLong()), owner) }; updateId = row.getString("update_id"); status = row.toString(2) }
+            catch (e: Exception) { status = e.message.orEmpty() }
+            finally { busy = false }
+        } }) { Text("تنزيل APK والتحقق من التوقيع والبصمة") }
+        if (updateId.isNotBlank()) {
+            TextButton(enabled = !busy, onClick = { busy = true; scope.launch {
+                try { status = withContext(Dispatchers.IO) { client.call("update_install", org.json.JSONObject().put("update_id", updateId), owner).toString(2) } }
+                catch (e: Exception) { status = e.message.orEmpty() }
+                finally { busy = false }
+            } }) { Text("مراجعة التحديث وفتح مثبت Android") }
+            TextButton(onClick = { scope.launch { try { status = withContext(Dispatchers.IO) { client.call("update_status", org.json.JSONObject().put("update_id", updateId), owner).toString(2) } } catch (e: Exception) { status = e.message.orEmpty() } } }) { Text("نتيجة التثبيت الفعلية") }
+        }
         TextButton(onClick = { client.disconnect(); status = client.status().toString() }) { Text("حذف الاتصال من هذا الهاتف") }
         TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/settings/applications"))) }) { Text("مراجعة تفويض الحساب وإلغاؤه في GitHub") }
     }

@@ -6,9 +6,15 @@ import subprocess
 import threading
 import os
 import signal
+import time
+import hashlib
+import http.client
+import socket
+import ssl
 from urllib.parse import urlsplit
 import urllib.request
-from .registry import Registry, tool
+from .registry import Registry, tool, external_schema
+from .network import WebClient
 
 VERSIONS = {"2025-06-18", "2025-03-26", "2024-11-05"}
 class MCPConnection:
@@ -21,7 +27,7 @@ class MCPConnection:
             self.messages = queue.Queue(maxsize=50)
             def reader():
                 try:
-                    for line in iter(self.process.stdout.readline, ""):
+                    for line in iter(lambda: self.process.stdout.readline(1000001), ""):
                         if len(line) > 1000000: break
                         value = json.loads(line); self.messages.put(value, timeout=1)
                 except (ValueError, queue.Full): pass
@@ -29,10 +35,12 @@ class MCPConnection:
                     try: self.messages.put({"error": {"message": "MCP stdio closed"}}, timeout=1)
                     except queue.Full: pass
             threading.Thread(target=reader, daemon=True).start()
-        result = self.rpc("initialize", {"protocolVersion": self.version, "capabilities": {}, "clientInfo": {"name": "M4", "version": "2.0"}})
-        if result.get("protocolVersion") not in VERSIONS: self.close(); raise ValueError("Unsupported MCP protocol version")
-        self.version = result["protocolVersion"]
-        self.rpc("notifications/initialized", notification=True)
+        try:
+            result = self.rpc("initialize", {"protocolVersion": self.version, "capabilities": {}, "clientInfo": {"name": "M4", "version": "2.0"}})
+            if result.get("protocolVersion") not in VERSIONS or config["transport"] == "http" and result.get("protocolVersion") == "2024-11-05": raise ValueError("Unsupported MCP transport/protocol version")
+            self.version = result["protocolVersion"]
+            self.rpc("notifications/initialized", notification=True)
+        except BaseException: self.close(); raise
 
     def rpc(self, method, params=None, notification=False):
         self.sequence += 1
@@ -42,8 +50,9 @@ class MCPConnection:
         if self.process:
             self.process.stdin.write(json.dumps(message) + "\n"); self.process.stdin.flush()
             if notification: return {}
+            deadline = time.monotonic() + 20
             for _ in range(50):
-                try: response = self.messages.get(timeout=20)
+                try: response = self.messages.get(timeout=max(.001,deadline-time.monotonic()))
                 except queue.Empty: raise ValueError("MCP response timed out")
                 if "method" in response:
                     if "id" in response:
@@ -55,17 +64,38 @@ class MCPConnection:
         else:
             headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream", "MCP-Protocol-Version": self.version}
             if self.session: headers["Mcp-Session-Id"] = self.session
-            req = urllib.request.Request(self.config["url"], json.dumps(message).encode(), headers, method="POST")
-            with urllib.request.urlopen(req, timeout=20) as stream:
+            parsed = urlsplit(self.config["url"])
+            origin = (parsed.scheme,parsed.hostname,parsed.port or (443 if parsed.scheme=='https' else 80))
+            url,port,address = WebClient({origin} if parsed.hostname in {"127.0.0.1","localhost","::1"} else ()).target(self.config["url"])
+            connection = http.client.HTTPConnection(url.hostname,port,timeout=20)
+            connection.sock = socket.create_connection((address,port),timeout=20)
+            if url.scheme == "https": connection.sock = ssl.create_default_context().wrap_socket(connection.sock,server_hostname=url.hostname)
+            try:
+                connection.request("POST",(url.path or '/')+('?' + url.query if url.query else ''),json.dumps(message).encode(),headers)
+                stream = connection.getresponse()
+                if stream.status not in {200,202,204}: raise ValueError("MCP HTTP " + str(stream.status) + "; redirects and legacy SSE endpoints are not accepted")
                 self.session = stream.headers.get("Mcp-Session-Id") or self.session
-                if stream.status == 202 and notification: return {}
-                data = stream.read(1000001)
-                if len(data) > 1000000: raise ValueError("MCP response too large")
+                if self.session and (len(self.session)>200 or not re.fullmatch(r"[\x21-\x7e]+",self.session)): raise ValueError("Invalid MCP session id")
+                if stream.status in {202,204} and notification: return {}
                 if "text/event-stream" in stream.headers.get("Content-Type", ""):
-                    values = [json.loads(line[5:].strip()) for line in data.decode().splitlines() if line.startswith("data:")]
-                    response = next((v for v in values if v.get("id") == message.get("id")), None)
+                    response, parts, size = None, [], 0
+                    deadline = time.monotonic()+20
+                    while time.monotonic()<deadline:
+                        line=stream.readline(100001); size+=len(line)
+                        if not line: break
+                        if len(line)>100000 or size>1000000: raise ValueError("MCP stream budget exceeded")
+                        line=line.decode().rstrip('\r\n')
+                        if line.startswith('data:'): parts.append(line[5:].lstrip())
+                        if not line and parts:
+                            value=json.loads('\n'.join(parts)); parts=[]
+                            if value.get('id')==message.get('id'): response=value; break
+                            if 'id' in value and 'method' in value: raise ValueError('Server-initiated MCP requests are unsupported')
                     if response is None: raise ValueError("MCP SSE has no matching response")
-                else: response = json.loads(data) if data else {}
+                else:
+                    data = stream.read(1000001)
+                    if len(data)>1000000: raise ValueError("MCP response too large")
+                    response=json.loads(data) if data else {}
+            finally: connection.close()
         if response.get("error"): raise ValueError("MCP error: " + str(response["error"].get("message", ""))[:400])
         if notification: return {}
         if response.get("id") != message["id"] or response.get("jsonrpc") != "2.0": raise ValueError("Mismatched MCP response")
@@ -82,7 +112,17 @@ class MCPConnection:
 
 class MCPManager:
     def __init__(self, runtime): self.runtime, self.servers, self.names = runtime, {}, {}
-    def connect(self, args):
+    def restore(self):
+        if self.runtime.mode != "auto_project" or not self.runtime.approved: return
+        path=self.runtime.state/"mcp-connections.json"
+        try: saved=json.loads(path.read_text())
+        except (OSError,ValueError): return
+        owner=os.environ.get("M4_OWNER_SESSION","terminal")
+        for config in list(saved.values())[:5]:
+            if config.get("owner") == owner:
+                try: self.connect({k:v for k,v in config.items() if k!='owner'}, restoring=True)
+                except (ValueError,OSError): pass
+    def connect(self, args, restoring=False):
         self.runtime._permission(execution=True)
         name = args["name"]
         if not re.fullmatch(r"[a-z][a-z0-9_]{1,40}", name): raise ValueError("Invalid MCP namespace")
@@ -94,6 +134,7 @@ class MCPManager:
         else:
             url = urlsplit(args.get("url", ""))
             if url.username or url.password or not url.hostname or not (url.scheme == "https" or url.scheme == "http" and url.hostname in {"127.0.0.1", "localhost"}): raise ValueError("MCP URL requires HTTPS or approved loopback")
+        if not restoring and self.runtime.capabilities.get('permission_broker') and not self.runtime.bridge.request('approve',{'tool':'Connect external MCP server','arguments':args}).get('approved'): raise ValueError('User denied MCP connection')
         from .runtime import child_environment
         connection = MCPConnection(config, self.runtime.root, child_environment())
         entries = []; cursor = None
@@ -109,8 +150,10 @@ class MCPManager:
                 original = entry["name"]
                 if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,60}", original): raise ValueError("Invalid MCP tool name")
                 full = "mcp__" + name + "__" + re.sub(r"[^A-Za-z0-9_]", "_", original)
+                if len(full)>64: full=full[:55]+'_'+hashlib.sha256(original.encode()).hexdigest()[:8]
                 spec = entry.get("inputSchema")
                 if not isinstance(spec, dict) or spec.get("type") != "object": raise ValueError("MCP input must be a JSON object schema")
+                spec=external_schema(spec)
                 descriptor = tool(full, "Untrusted MCP " + str(entry.get("description", ""))[:1000]); descriptor["function"]["parameters"] = spec
                 self.runtime.registry.register(descriptor, lambda a, n=name, t=original: self.invoke(n, t, a),
                     {"risk_level": "external", "capabilities": ["mcp:" + name], "requires_user_consent": True, "version": connection.version, "timeout": 20})
@@ -118,7 +161,7 @@ class MCPManager:
             self.servers[name], self.names[name] = connection, registered
             path = self.runtime.state / "mcp-connections.json"
             configurations = json.loads(path.read_text()) if path.exists() else {}
-            configurations[name] = config; path.write_text(json.dumps(configurations))
+            configurations[name] = dict(config,owner=os.environ.get('M4_OWNER_SESSION','terminal')); path.write_text(json.dumps(configurations))
             return {"status": "connected", "name": name, "protocol": connection.version, "tools": registered}
         except BaseException:
             connection.close()

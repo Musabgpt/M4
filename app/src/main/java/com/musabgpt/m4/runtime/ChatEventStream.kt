@@ -14,13 +14,32 @@ import android.database.sqlite.SQLiteDatabase
 import android.content.ContentValues
 
 data class RuntimeEvent(val id: Long, val kind: String, val tool: String, val arguments: String, val result: String,
-    val turn: String = "", val time: Double = 0.0, val ok: Boolean? = null)
+    val turn: String = "", val time: Double = 0.0, val ok: Boolean? = null, val callId: String = "")
 
 object ChatEventStream {
     fun read(context: Context, owner: String, turn: String? = null, limit: Int = 30): List<RuntimeEvent> {
         val files = listOf(File(LinuxEnvironment.rootfs(context), "root/projects/M4/.term-agent/events.jsonl"),
             File(context.filesDir, "native-chat-events/events.jsonl"))
-        return files.flatMap { file -> readFile(file, owner, turn) }.sortedBy { it.time }.takeLast(limit.coerceIn(1, 500))
+        val maximum = limit.coerceIn(1, 5000)
+        return files.flatMap { file -> readDatabase(File(file.parentFile, "events.sqlite3"), owner, turn, maximum)
+            .ifEmpty { readFile(file, owner, turn) } }.sortedBy { it.time }.takeLast(maximum)
+    }
+
+    private fun readDatabase(file: File, owner: String, turn: String?, limit: Int): List<RuntimeEvent> {
+        if (!file.isFile) return emptyList()
+        return try { SQLiteDatabase.openDatabase(file.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            db.rawQuery("SELECT id,time,kind,data FROM events WHERE owner=? ORDER BY time DESC LIMIT ?", arrayOf(owner, limit.toString())).use { cursor ->
+                buildList { while (cursor.moveToNext()) {
+                    val data = JSONObject(cursor.getString(3))
+                    if (turn != null && data.optString("turn_id") != turn) continue
+                    val kind = cursor.getString(2)
+                    add(RuntimeEvent(if (file.parentFile?.name == "native-chat-events") -cursor.getLong(0) else cursor.getLong(0), kind,
+                        data.optString("tool"), data.optJSONObject("args")?.toString()?.take(3000).orEmpty(),
+                        (if (kind == "token") data.optString("text") else if (data.has("result")) data.optString("result") else data.toString()).take(12000),
+                        data.optString("turn_id"), cursor.getDouble(1), if (data.has("ok")) data.optBoolean("ok") else null, data.optString("call_id")))
+                } }
+            }
+        } } catch (_: Exception) { emptyList() }
     }
 
     private fun readFile(file: File, owner: String, turn: String?): List<RuntimeEvent> {
@@ -46,7 +65,7 @@ object ChatEventStream {
                             if (row.optString("kind") == "token") data?.optString("text", "").orEmpty()
                             else (if (data?.has("result") == true) data.optString("result") else data?.toString().orEmpty()).take(7000),
                             data?.optString("turn_id", "").orEmpty(), row.optDouble("time", 0.0),
-                            if (data?.has("ok") == true) data.optBoolean("ok") else null)
+                            if (data?.has("ok") == true) data.optBoolean("ok") else null, data?.optString("call_id").orEmpty())
                     }
                 } catch (_: Exception) { null }
             }.toList()

@@ -6,7 +6,7 @@ object PhoneIntent {
         .replace(Regex("[\\u064B-\\u065F\\u0670]"), "").replace(Regex("\\s+"), " ")
     fun openTarget(text: String): String? {
         val clean = normalize(text).removePrefix("لو سمحت ").removePrefix("please ")
-        val match = Regex("^(?:افتح|شغل تطبيق|open|launch)\\s+(?:تطبيق\\s+|برنامج\\s+)?(.{1,100})[.!؟?]?$", RegexOption.IGNORE_CASE).matchEntire(clean) ?: return null
+        val match = Regex("^(?:افتح|شغل تطبيق|open|launch)\\s+(?:تطبيق\\s+|برنامج\\s+|app\\s+)?(.{1,100})[.!؟?]?$", RegexOption.IGNORE_CASE).matchEntire(clean) ?: return null
         val target = match.groupValues[1].trim().trimEnd('.', '!', '؟', '?')
         if (target.contains(Regex("(?:\\sو(?:ا|ش|ن|ح|ب)|\\s(?:and|then)\\s)|[;/\\n]"))) return null
         return target.takeIf { it.isNotBlank() && (alias(it) != normalize(it) ||

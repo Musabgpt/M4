@@ -57,6 +57,7 @@ class M4ChatActivity : ComponentActivity() {
                 browser.onNavigate = { panel = "browser" }
                 var attachments by remember { mutableStateOf(emptyList<ChatArtifact>()) }
                 var events by remember { mutableStateOf(emptyList<RuntimeEvent>()) }
+                var eventLimit by remember(owner) { mutableStateOf(100) }
                 LaunchedEffect(panel) { if (panel == "terminal") terminal.open() }
                 LaunchedEffect(owner) {
                     while (true) {
@@ -64,7 +65,7 @@ class M4ChatActivity : ComponentActivity() {
                             ArtifactRepository.importPublished(this@M4ChatActivity)
                             ArtifactRepository.list(this@M4ChatActivity, owner)
                         }
-                        events = withContext(Dispatchers.IO) { ChatEventStream.read(this@M4ChatActivity, owner) }
+                        events = withContext(Dispatchers.IO) { ChatEventStream.read(this@M4ChatActivity, owner, limit = eventLimit) }
                         delay(1500)
                     }
                 }
@@ -75,16 +76,17 @@ class M4ChatActivity : ComponentActivity() {
                             "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
                                 runAgent = { goal -> vm.send(goal) },
                                 readAgentProgress = { AgentProgressStore.read(this@M4ChatActivity) },
-                                artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, vm = vm)
+                                artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, loadOlderEvents = { eventLimit = (eventLimit + 200).coerceAtMost(5000) }, vm = vm)
                             "terminal" -> TerminalPanel(terminal)
                             "files" -> FilesPanel()
                             "tasks" -> SchedulerPanel(owner)
                             "github" -> com.musabgpt.m4.github.GitHubPanel(owner)
+                            "tools" -> com.musabgpt.m4.runtime.ToolsPanel(vm) { panel = "chat" }
                         } }
                     }
                     HorizontalDivider()
                     Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        listOf("chat" to "محادثة", "terminal" to "طرفية", "files" to "ملفات", "tasks" to "مهام", "browser" to "متصفح", "github" to "GitHub").forEach { (key, label) ->
+                        listOf("chat" to "محادثة", "terminal" to "طرفية", "files" to "ملفات", "tasks" to "مهام", "browser" to "متصفح", "github" to "GitHub", "tools" to "أدوات").forEach { (key, label) ->
                             TextButton(onClick = { panel = key; if (key == "terminal") terminal.open() }) {
                                 Text((if (panel == key) "● " else "") + label)
                             }

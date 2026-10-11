@@ -6,7 +6,10 @@ from .provider_health import ProviderHealth
 COMMANDS = ("tools", "skills", "mcp", "agents", "hooks", "terminal", "termux", "phone", "browser", "artifacts", "export", "schedule", "tasks", "task", "doctor", "selftest", "github", "plan", "permissions", "rewind", "cost", "compact", "memory", "init", "git", "model", "status")
 def dispatch(runtime, text):
     words = shlex.split(text); name = words[0].lstrip("/"); rest = words[1:]
-    def call(tool, arguments=None): return runtime.call(tool, arguments or {})
+    def call(tool, arguments=None):
+        value = runtime.call(tool, arguments or {})
+        if getattr(runtime, "command_event", None): runtime.command_event(tool, arguments or {}, value)
+        return value
     def payload():
         position = text.find("{")
         if position < 0: raise ValueError("This command requires a JSON object with the tool arguments")
@@ -42,6 +45,15 @@ def dispatch(runtime, text):
     if name == "doctor": return runtime.environment()
     if name == "selftest": return call("Verify")
     if name == "github": return call("GitHubStatus")
+    if name == "termux" and rest:
+        if rest[0] == "run": return call("TermuxRun", payload())
+        if rest[0] == "output": return call("TermuxOutput", {"id": rest[1]})
+    if name == "phone" and rest:
+        action = {"apps": "PhoneListApps", "screen": "PhoneScreen", "device": "PhoneDevice", "battery": "PhoneBattery", "open": "PhoneOpenApp", "test": "PhoneTestLab"}.get(rest[0])
+        if action: return call(action, {"app": " ".join(rest[1:])} if rest[0] == "open" else payload() if rest[0] == "test" else {})
+    if name == "browser" and rest:
+        action = {"dom": "BrowserReadDOM", "console": "BrowserConsole", "network": "BrowserNetwork", "open": "BrowserOpen", "test": "BrowserTestLab"}.get(rest[0])
+        if action: return call(action, {"url": rest[1]} if rest[0] == "open" else payload() if rest[0] == "test" else {})
     if name == "artifacts": return runtime.artifacts.list_published()
     if name == "tasks": return call("ScheduleList")
     if name == "task" and len(rest) > 1:

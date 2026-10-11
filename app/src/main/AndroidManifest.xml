@@ -3,6 +3,7 @@
     <!-- Discover only apps with a launcher icon. No QUERY_ALL_PACKAGES required. -->
     <queries>
         <package android:name="com.termux"/>
+        <package android:name="dev.newal.code.lite.connectors"/>
         <intent>
             <action android:name="android.intent.action.MAIN"/>
             <category android:name="android.intent.category.LAUNCHER"/>
@@ -15,6 +16,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="com.termux.permission.RUN_COMMAND"/>
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application android:label="M4 • MusabAI"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="false" android:networkSecurityConfig="@xml/network_security_config" android:allowBackup="false" android:supportsRtl="true">
@@ -33,6 +35,7 @@
             android:authorities="${applicationId}.artifacts" android:exported="false"
             android:grantUriPermissions="true"/>
         <receiver android:name="com.musabgpt.m4.terminal.TermuxResultReceiver" android:exported="false"/>
+        <receiver android:name="com.musabgpt.m4.github.UpdateInstallReceiver" android:exported="false"/>
         <service android:name=".TerminalService"
             android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"

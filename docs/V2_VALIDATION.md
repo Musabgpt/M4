@@ -1,77 +1,40 @@
-# V2 implementation and acceptance evidence
+# M4 / NewAl merge validation
 
-This delivery implements the first workbench gates from the supplied V2 roadmap.
-It does not establish completion of the entire roadmap. The repository was
-audited at remote `56de7a901fc22a1b2e6d374800d73bb6b131bf2c`; changes are in
-`codex/m4-v2-integration`, draft PR https://github.com/Musabgpt/M4/pull/9.
+The implementation covers the V2 workbench, runtime and integrations. Full Android acceptance remains incomplete where physical device, account authorization or original signing material is required. This report supersedes earlier first-gate reports.
 
-## Verified development evidence
+## Observed evidence
 
-- Original regression: 26 agent tests and four signing-policy tests passed.
-- V2 offline tests: 48 agent tests and four signing-policy tests pass. Coverage
-  includes exact reads/atomic edits, unchanged-read checks, permission
-  modes, strict prompted envelopes, real text/ZIP artifacts, hash tampering,
-  secret exclusions, bounded processes, cancellation, timeouts, task state,
-  semantic loop detection, exclusive project ownership and interrupt recovery.
-- Python compile and shell syntax checks pass. Existing signing pin, release
-  signing script and SafeRootfsExtractor bytes are preserved.
-- Implementation commit `76e92f3d48bab2ea1e32da6a940ab397052202de` passed
-  agent run 38127226774 and Android SDK/NDK/rootfs/APK run 38127226764.
-  The latter runs all six JVM tests, including the complete bundled Alpine
-  extraction test, and produced the real `ArabicTerminal-debug-APK` artifact
-  (109,787,908 ZIP bytes), artifact ID 11697633458. Final CI results for later
-  workflow/documentation changes are linked on the PR.
-- Four additional JVM tests cover URL boundaries and DST/missed schedule
-  windows. The lightweight Kotlin/Java job runs these and the standalone
-  hard-link regression without downloading Alpine. The APK job retains the
-  complete suite after bundling Alpine; no extraction assertion is removed.
+- Current local Python suite: **74 tests passed**, including real HTTP server lifecycle, real MCP HTTP/SSE, MCP restoration, multi-turn rewind and subagent isolation.
+- Signing-policy suite and compilation are run separately in CI.
+- Prior merged commit `30d4969f0b9f645003a9c3336c7a9e95f68def79`: all four CI workflows succeeded. Android emulator evidence: https://github.com/Musabgpt/M4/actions/runs/38134388667 ; APK build: https://github.com/Musabgpt/M4/actions/runs/38134388655 . These links do not validate changes made after that commit.
+- New commits must pass their own Kotlin/JVM, APK and emulator workflows. See PR #9 checks for the exact tested SHA. The live-provider artifact records **PASS or BLOCKED** independently of offline tests.
+- Android evidence exercises owned WebView interaction, actual Arabic PDF page rendering, artifact tamper/owner rejection, persisted scheduler rows and launcher capabilities. An additional test rejects a development APK as an original-certificate update.
+- No physical ARM64 phone or original private signing key is available. Host GitHub authorization is not a credential transferable to the Android app.
 
-No physical device, emulator, authenticated ADB, optional Termux, Accessibility,
-OAuth application configuration or private signing key was supplied. CI APK
-construction is evidence of construction, not evidence of device behavior.
+## Complete user acceptance journeys
 
-## Post-implementation capability status
+The statuses below concern the full Android scenario, not just its passing components.
 
-| Capability | Status | Evidence and remaining prerequisite |
-| --- | --- | --- |
-| Strict registry, exact tools, Todo, process pool | implemented_verified | Offline behavioral tests, real subprocess output |
-| Native + prompted JSON call validation | implemented_verified | Registry tests; live provider uptime is not guaranteed |
-| Plan mode, memory, compaction, loop recovery, locks | implemented_verified | Python tests; memory remains untrusted data |
-| Embedded terminal in launcher Activity / events | implemented_unverified | CI compilation; device PTY/ANSI/rotation acceptance required |
-| UTF-8 / ZIP artifact generation and persistence | implemented_verified | Actual files, syntax, ZIP CRC and SHA-256 tests |
-| Arabic PDF, native bridge, card preview/save/share | implemented_unverified | Android implementation compiled; device rendering/export required |
-| WorkManager / SQLite task execution and approval | implemented_unverified | Android compilation; repeat, restart, stop and lock acceptance required |
-| Daily local-time calculation | implemented_verified | JVM DST and missed-window tests pass; device scheduling remains unverified |
-| File editor/diff and owned-WebView DOM | implemented_unverified | Compiled workbench; device interaction required |
-| Existing manual phone controls | partial | Preserved; model bridge and phone test lab missing |
-| Termux optional backend | missing | No permission/verified installed app/result adapter |
-| Skills, MCP, subagents, hooks, tool factory | missing | No executable implementation in this delivery |
-| Product GitHub device flow / credential vault / self-CI | missing | The host's GitHub connector does not register these inside M4 |
-| Full permission dialog / approval steering / rewind UI | partial | Plan/execute switch, task-scope approval and file review work; full gate remains |
-| Signing and rootfs protections | implemented_verified | Existing policy tests and Android CI; release key still required |
+| Case | Status | Evidence still needed |
+|---|---|---|
+| E2E-01 Python from chat | BLOCKED | ARM64 Alpine chat-to-script/stdout/card journey; host real-process counterpart passes |
+| E2E-02 Documents and restart | BLOCKED | Native save/share/reopen journey; real PDF rendering and byte validation pass |
+| E2E-03 Interactive web project | BLOCKED | Full model-to-Android project journey; actual WebView interaction/screenshot component passes |
+| E2E-04 Background server | BLOCKED | Android PTY observation; host persistent process + HTTP + stop passes |
+| E2E-05 Termux | BLOCKED | Installed compatible Termux and granted RUN_COMMAND permission |
+| E2E-06 Hourly CI task | BLOCKED | Product GitHub authorization and elapsed repetition on device |
+| E2E-07 Daily scheduled tests | BLOCKED | Actual device scheduling/reboot evidence; calendar/DST unit checks exist |
+| E2E-08 Phone test | BLOCKED | Authorized physical accessibility interaction and emergency stop |
+| E2E-09 Product self-CI | BLOCKED | Product OAuth client ID and authorization; host PR is not product self-CI evidence |
+| E2E-10 Dynamic skill | BLOCKED | Android journey; actual skill script/registration tests pass on host |
+| E2E-11 Denied phone permission | BLOCKED | Combined phone-denial and ARM64 terminal journey; emulator denied-access guard tested |
+| E2E-12 Network/UI interruption | BLOCKED | Android kill/reopen; durable command restoration tested on host |
+| E2E-13 Injection/security | NOT_TESTED | Full adversarial website journey; schema, secret, origin, ownership and plan-mode component tests pass |
+| E2E-14 Single Activity | BLOCKED | Full ARM64 build/test/navigation journey |
+| E2E-15 10,000 events / 30 minutes | NOT_TESTED | Physical memory/ANR/thermal and cancellation measurements |
 
-## Full user acceptance cases
+## Permissions and release limits
 
-All cases below refer to the Android application's complete requested journey.
-Partial desktop evidence does not mark the full Android scenario PASS.
+Added explicit Termux RUN_COMMAND integration and Android REQUEST_INSTALL_PACKAGES for user-confirmed verified updates. Added non-exported result receivers and narrowly scoped package visibility. No QUERY_ALL_PACKAGES, root grant or screen-protection bypass is added. The pinned certificate and original release-signing policy remain enforced.
 
-| Case | Status | Required evidence / blocker |
-| --- | --- | --- |
-| E2E-01 Python from chat | BLOCKED | ARM64 device; generated script, actual stdout/exit code and persistent card |
-| E2E-02 Eight formats / restart | BLOCKED | Device PDF rendering, HTML preview, ZIP CRC, export hash and reopened cards |
-| E2E-03 Interactive web app | NOT_TESTED | DOM action assertions/screenshots bridge is not implemented |
-| E2E-04 Embedded background server | BLOCKED | Device PTY/server HTTP observation and termination; process unit subset passes |
-| E2E-05 Termux | BLOCKED | Optional connector + compatible installed/authorized Termux |
-| E2E-06 Hourly CI check | BLOCKED | Durable device run history and configured GitHub command access |
-| E2E-07 Daily tests | BLOCKED | Actual device WorkManager window, DST/reboot evidence and report |
-| E2E-08 Phone test | BLOCKED | Phone bridge/test lab, authorized service and physical assertions |
-| E2E-09 Product self-CI | BLOCKED | Product GitHub authorization/vault and CI loop; host PR is not that product feature |
-| E2E-10 Dynamic skill | NOT_TESTED | Skills runtime not implemented |
-| E2E-11 Refused phone permission | BLOCKED | Device refusal plus unaffected real terminal/artifact behavior |
-| E2E-12 Network/UI interruption | BLOCKED | Device kill/reopen and durable result; host locks/cancellation tests pass |
-| E2E-13 Injection/security | NOT_TESTED | Full malicious-page journey; strict tool/path/secret unit checks pass |
-| E2E-14 One Activity | BLOCKED | Actual on-device chat/terminal/files/task/browser interaction |
-| E2E-15 10,000 events / 30 minutes | NOT_TESTED | Device memory/ANR/cancellation measurements |
-
-See CHAT_ARTIFACTS.md, SCHEDULER.md, BROWSER_AUTOMATION.md, SECURITY.md,
-PHONE_TESTING.md and TERMUX_INTEGRATION.md for behavior and precise limits.
+The development APK uses `dev.newal.code.lite.connectors.m4dev` and installs alongside the original. Updating the original package requires its private signing key in the repository's existing signing secret. An OAuth application's client ID is public configuration, but it cannot be derived from this session's GitHub connector.

@@ -74,7 +74,7 @@ class M4BridgeServer(private val context: Context) : Closeable {
                 "capabilities", "artifact_inspect", "termux_output" -> true
                 "phone" -> arguments.optString("action") in setOf("list_apps", "device", "battery", "screen", "wait_for", "assert_visible")
                 "browser" -> arguments.optString("action") in setOf("read_dom", "wait_for", "assert_visible", "console", "network")
-                "github" -> arguments.optString("action") in setOf("status", "repositories", "runs", "run", "jobs", "job_logs", "artifacts", "pull_requests", "pull_request")
+                "github" -> arguments.optString("action") in setOf("status", "check_connection", "repositories", "runs", "run", "jobs", "job_logs", "artifacts", "pull_requests", "pull_request", "update_status")
                 "schedule" -> arguments.optString("action") in setOf("list", "logs")
                 else -> false
             }) { "Plan mode is read-only in the native host" }

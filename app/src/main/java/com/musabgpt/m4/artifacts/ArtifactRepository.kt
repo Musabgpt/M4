@@ -46,7 +46,9 @@ object ArtifactRepository {
                 if (!identifier.matches(directory.name)) return@mapNotNull null
                 val manifest = File(directory, "manifest.json")
                 if (!manifest.isFile || manifest.length() > 32000) return@mapNotNull null
-                val row = decode(JSONObject(manifest.readText()))
+                val obj = JSONObject(manifest.readText())
+                if (obj.optBoolean("archived")) return@mapNotNull null
+                val row = decode(obj)
                 if (row.owner != owner || row.id != directory.name || !validName(row.name)) null else row
             } catch (_: Exception) { null }
         }.sortedBy { it.createdAt }
@@ -157,12 +159,18 @@ object ArtifactRepository {
         }
     }
 
-    fun fork(context: Context, source: String, target: String): Map<String, String> = list(context, source).associate { old ->
+    fun fork(context: Context, source: String, target: String, ids: Set<String>): Map<String, String> = list(context, source).filter { it.id in ids }.associate { old ->
         val id = UUID.randomUUID().toString().replace("-", "")
         val directory = File(root(context), id).apply { mkdirs() }
         file(context, old.id, old.name).copyTo(File(directory, old.name))
         File(directory, "manifest.json").writeText(old.copy(id = id, owner = target).json().toString())
         old.id to id
+    }
+    fun archive(context: Context, owner: String, ids: List<String>) {
+        list(context, owner).filter { it.id in ids }.forEach { row ->
+            val manifest = File(root(context), "${row.id}/manifest.json")
+            manifest.writeText(JSONObject(manifest.readText()).put("archived", true).toString())
+        }
     }
 
     fun syncImports(context: Context, owner: String) {

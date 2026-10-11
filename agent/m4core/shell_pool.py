@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import uuid
+import threading
 
 class ShellPool:
     def __init__(self, root, commands, state):
@@ -21,12 +22,13 @@ class ShellPool:
         if not argv or '/' in argv[0] or argv[0] not in self.commands: raise ValueError('Executable not allowed')
         identifier = uuid.uuid4().hex; folder = self.folder/identifier; folder.mkdir(mode=0o700)
         timeout = args.get('timeout',90)
-        (folder/'request.json').write_text(json.dumps(dict(owner=self.owner, root=str(self.root), argv=argv, timeout=timeout)))
+        (folder/'request.json').write_text(json.dumps(dict(owner=self.owner, root=str(self.root), argv=argv, timeout=timeout, stdin=args.get('stdin'))))
         worker = Path(__file__).with_name('shell_worker.py')
         process = subprocess.Popen([sys.executable, str(worker), str(folder)], cwd=self.root,
             env=child_environment(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True, close_fds=True)
         self.jobs[identifier] = (process, args.get('background',False))
+        if args.get('background', False): threading.Thread(target=process.wait, daemon=True).start()
         end = time.monotonic()+3
         while not (folder/'state.json').is_file() and process.poll() is None and time.monotonic()<end: time.sleep(.02)
         if not args.get('background',False):

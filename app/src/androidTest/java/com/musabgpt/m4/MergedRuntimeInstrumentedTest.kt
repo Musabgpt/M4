@@ -96,4 +96,9 @@ class MergedRuntimeInstrumentedTest {
         evidence("capabilities.json", JSONObject().put("sdk", android.os.Build.VERSION.SDK_INT).put("abi", android.os.Build.SUPPORTED_ABIS[0])
             .put("phone_permission", screen).put("alpine_runtime", if (LinuxEnvironment.runtimeAvailable(context)) "available_not_executed" else "BLOCKED: ARM64 runtime unavailable on this emulator").toString(2))
     }
+    @Test fun developmentApkCannotMasqueradeAsOriginalSignedUpdate() {
+        val file = File(context.applicationInfo.sourceDir)
+        assertThrows(IllegalArgumentException::class.java) { com.musabgpt.m4.github.ApkUpdates.validate(context, file) }
+        evidence("signing.json", JSONObject().put("result", "PASS").put("assertion", "Installed development APK rejected as an original NewAl update").toString(2))
+    }
 }

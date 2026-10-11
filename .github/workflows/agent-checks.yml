@@ -25,3 +25,12 @@ jobs:
           python3 -m py_compile agent/agent.py agent/provider_routes.py
           test -s agent/system_prompt.md
           bash -n agent/term-agent.sh agent/m4-agent-start.sh agent/term-agent-watch.sh
+      - name: Record actual public provider and file creation result
+        timeout-minutes: 3
+        run: python3 scripts/probe-chat.py qa-provider
+      - name: Preserve live provider evidence (inspect PASS or BLOCKED in receipt)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: M4-Live-Provider-Evidence
+          path: qa-provider/

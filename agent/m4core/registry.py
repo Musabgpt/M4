@@ -75,7 +75,7 @@ class Registry:
             if not specification.get("minLength", 0) <= len(value) <= specification.get("maxLength", 500000): raise ValueError("Invalid field length: " + field)
             if "pattern" in specification:
                 pattern = specification["pattern"]
-                if len(pattern) > 200 or re.search(r"[+*}]\s*[+*{]", pattern): raise ValueError("Unbounded external schema pattern")
+                if len(pattern) > 200 or any(c in pattern for c in "(){}|") or re.search(r"[+*}]\s*[+*{]", pattern): raise ValueError("Complex external schema pattern is unsupported")
                 if not re.search(pattern, value[:5000]): raise ValueError("Pattern mismatch: " + field)
         if kind == "object":
             properties = specification.get("properties", {})
@@ -97,6 +97,34 @@ class Registry:
     def call(self, name, arguments):
         self.validate(name, arguments)
         return self.entries[name][1](arguments)
+
+def external_schema(specification):
+    """Resolve only local JSON refs; reject constraints our validator cannot enforce."""
+    allowed = {"type", "properties", "required", "additionalProperties", "items", "minItems", "maxItems", "enum", "const", "minimum", "maximum", "minLength", "maxLength", "pattern", "anyOf", "oneOf", "allOf"}
+    annotations = {"$schema", "$id", "description", "title", "default", "examples", "$defs", "definitions", "format", "deprecated", "readOnly", "writeOnly"}
+    def visit(node, depth=0):
+        if depth > 12 or not isinstance(node, dict): raise ValueError("Invalid or recursive external schema")
+        if "$ref" in node:
+            reference = node["$ref"]
+            if not isinstance(reference, str) or not reference.startswith("#/"): raise ValueError("External schema refs are unsupported")
+            target = specification
+            for component in reference[2:].split("/"): target = target[component.replace("~1", "/").replace("~0", "~")]
+            return visit(dict(target, **{k:v for k,v in node.items() if k != "$ref"}), depth+1)
+        if set(node)-allowed-annotations: raise ValueError("Unsupported external schema constraint: " + ",".join(set(node)-allowed-annotations))
+        result = {k:v for k,v in node.items() if k in allowed}
+        kinds = node.get("type", [])
+        if isinstance(kinds,str): kinds=[kinds]
+        if not isinstance(kinds,list) or any(k not in {"object","array","string","integer","number","boolean","null"} for k in kinds): raise ValueError("Invalid external schema type")
+        for key in ("anyOf","oneOf","allOf"):
+            if key in result:
+                if not isinstance(result[key],list) or len(result[key])>20: raise ValueError("Too many schema alternatives")
+                result[key]=[visit(x,depth+1) for x in result[key]]
+        if "properties" in result: result["properties"]={k:visit(v,depth+1) for k,v in result["properties"].items()}
+        for key in ("items","additionalProperties"):
+            if isinstance(result.get(key),dict): result[key]=visit(result[key],depth+1)
+        if "pattern" in result and (len(result["pattern"])>200 or any(c in result["pattern"] for c in "(){}|")): raise ValueError("Complex external schema pattern unsupported")
+        return result
+    return visit(specification)
 
 
 def prompted_calls(text, registry):

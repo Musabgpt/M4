@@ -29,6 +29,7 @@ android {
         // GitHub M4_BUILD_NUMBER monotonically advances across releases.
         versionCode (10000 + ((System.getenv('M4_BUILD_NUMBER') ?: '0') as Integer))
         versionName '2.0.0'
+        buildConfigField 'String', 'ORIGINAL_CERT_SHA256', '"' + rootProject.file('android/signing-cert-sha256.txt').text.trim() + '"'
         externalNativeBuild { cmake { cFlags '-std=c11' } }
     }
     externalNativeBuild {
@@ -50,7 +51,7 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    buildFeatures { compose true }
+    buildFeatures { compose true; buildConfig true }
     kotlinOptions { jvmTarget = '17' }
     signingConfigs {
         if (hasReleaseSigning) {
@@ -94,6 +95,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
     implementation 'androidx.work:work-runtime-ktx:2.10.1'
+    implementation 'com.android.tools.build:apksig:8.9.2'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test:rules:1.6.1'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'

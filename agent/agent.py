@@ -20,7 +20,7 @@ import uuid
 # from the last verified advanced NewAl-Cloud build.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from newal import continuity, task_state
-from provider_routes import order as gateway_order
+from provider_routes import order as gateway_order, headers as provider_headers
 from m4core.runtime import ToolRuntime, MODES
 from m4core.registry import prompted_calls
 
@@ -161,21 +161,31 @@ def execute(root, state, name, args, approved, runtime=None):
     except (ValueError, OSError, KeyError, UnicodeError, SyntaxError, subprocess.TimeoutExpired) as error:
         return "Tool error: " + str(error)
 
+class BoundedResponse:
+    def __init__(self, response): self.response = response
+    def read(self):
+        data = self.response.read(1500001)
+        if len(data) > 1500000: raise ValueError("Provider response exceeds budget")
+        return data
+
 def endpoint():
     routes=gateway_order(os.environ.get("M4_GATEWAY_FAMILY","freellmpool"))
     selected=routes[0]
     return selected.base_url.rstrip("/")+"/chat/completions",selected.model
 
 def ask(url, model, messages, allow_text=False, require_tools=False, on_event=None):
-    from m4core.provider_health import ProviderHealth, streamed_reply
+    from m4core.provider_health import ProviderHealth, streamed_reply, vision_probe
     from m4core.registry import provider_calls
     health, errors = ProviderHealth(), []
-    deadline = time.monotonic() + 150
+    deadline = time.monotonic() + min(150, max(5, int(os.environ.get("M4_PROVIDER_DEADLINE_SECONDS", "150"))))
+    vision_needed = any(isinstance(m.get("content"),list) and any(p.get("type")=="image_url" for p in m["content"] if isinstance(p,dict)) for m in messages)
     for route in gateway_order(os.environ.get("M4_GATEWAY_FAMILY", "freellmpool")):
         if time.monotonic() >= deadline: break
         if not health.available(route.name):
             errors.append(route.name + ": circuit cooling down")
             continue
+        if vision_needed and not vision_probe(route,health):
+            errors.append(route.name+": image understanding not verified by actual image probe"); continue
         started, dialog, native_payload = time.monotonic(), list(messages), True
         for attempt in range(3):
             reply = None
@@ -185,13 +195,14 @@ def ask(url, model, messages, allow_text=False, require_tools=False, on_event=No
                 if native_payload: body.update(tools=TOOLS, tool_choice="auto")
                 else:
                     body["messages"] = [{"role": "system", "content": "Return only {\"tool_calls\":[{\"name\":...,\"arguments\":{...}}]} for actions. Exact schemas:\n" + json.dumps(TOOLS, ensure_ascii=False)}] + dialog
-                request = urllib.request.Request(route.base_url.rstrip("/") + "/chat/completions", json.dumps(body, ensure_ascii=False).encode(), {"Content-Type": "application/json"}, method="POST")
+                request = urllib.request.Request(route.base_url.rstrip("/") + "/chat/completions", json.dumps(body, ensure_ascii=False).encode(), provider_headers(route), method="POST")
                 timeout = min(4 if route.local else 30, max(1, deadline - time.monotonic()))
                 with urllib.request.urlopen(request, timeout=timeout) as response:
                     if "text/event-stream" in getattr(response, "headers", {}).get("Content-Type", ""):
                         reply, usage = streamed_reply(response, on_event)
                     else:
-                        data = json.load(response); reply = data["choices"][0]["message"]; usage = data.get("usage")
+                        data = json.load(BoundedResponse(response)); reply = data["choices"][0]["message"]; usage = data.get("usage")
+                        reply["reported_model"] = data.get("model")
                 if not isinstance(reply, dict): raise ValueError("Invalid model reply")
                 if not isinstance(reply.get("tool_calls"), list) or not reply["tool_calls"]:
                     try:
@@ -204,8 +215,9 @@ def ask(url, model, messages, allow_text=False, require_tools=False, on_event=No
                 for call in reply["tool_calls"]:
                     fn = call.get("function", {})
                     ACTIVE_REGISTRY.validate(fn.get("name"), json.loads(fn.get("arguments", "{}")))
-                reply.update(m4_route=route.name, m4_model=route.model, m4_usage=usage, m4_tool_mode=mode)
-                health.record(route.name, True, time.monotonic() - started, route.model, mode, usage)
+                measured_model = reply.get("reported_model") or "unknown (requested " + route.model + ")"
+                reply.update(m4_route=route.name, m4_model=measured_model, m4_usage=usage, m4_tool_mode=mode)
+                health.record(route.name, True, time.monotonic() - started, measured_model, mode, usage)
                 return reply
             except (OSError, KeyError, ValueError, IndexError, TypeError) as error:
                 reason = str(error)[:240]
@@ -244,10 +256,11 @@ def chat_turn(root, state, request, approved=False, permission_mode=None, max_st
         previous_turn = os.environ.get("M4_TURN_ID")
         os.environ["M4_OWNER_SESSION"] = request["owner_session_id"]
         os.environ["M4_TURN_ID"] = request["turn_id"]
-        runtime = ToolRuntime(root, state, safe_path, backup, COMMANDS, command, approved, permission_mode)
-        TOOLS, ACTIVE_REGISTRY = runtime.registry.schemas, runtime.registry
-        db = history(state)
+        runtime, db = None, None
         try:
+            runtime = ToolRuntime(root, state, safe_path, backup, COMMANDS, command, approved, permission_mode)
+            TOOLS, ACTIVE_REGISTRY = runtime.registry.schemas, runtime.registry
+            db = history(state)
             def task_runner(arguments):
                 identifier = uuid.uuid4().hex
                 child_state = state / "subagents" / identifier
@@ -262,6 +275,7 @@ def chat_turn(root, state, request, approved=False, permission_mode=None, max_st
                     report = run_turn(sys.modules[__name__], root, child_state, child_request, child, child_db, arguments.get("steps", 8))
                     report.update(agent_id=identifier, permission_mode="plan_only", type=arguments.get("type", "reviewer"))
                     save(child_state / "report.json", report)
+                    runtime.hooks.run("SubagentStop", arguments={"agent_id": identifier, "status": report["status"]}, result={"report_path": str(child_state / "report.json")})
                     return report
                 finally:
                     child.close(); child_db.close()
@@ -274,7 +288,8 @@ def chat_turn(root, state, request, approved=False, permission_mode=None, max_st
                  "owner_session_id": request["owner_session_id"], "turn_id": request["turn_id"], "summary": result["content"]})
             return result
         finally:
-            runtime.close(); db.close()
+            if runtime is not None: runtime.close()
+            if db is not None: db.close()
             if previous_owner is None:
                 os.environ.pop("M4_OWNER_SESSION", None)
             else:

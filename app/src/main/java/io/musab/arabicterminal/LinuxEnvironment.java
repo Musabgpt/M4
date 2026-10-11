@@ -36,7 +36,7 @@ public final class LinuxEnvironment {
         boolean currentRuntime=false;
         try{
             currentRuntime=new String(Files.readAllBytes(runtimeMarker.toPath()),
-                java.nio.charset.StandardCharsets.UTF_8).contains("agent-runtime-v4");
+                java.nio.charset.StandardCharsets.UTF_8).contains("agent-runtime-v5");
         }catch(IOException ignored){}
         if(installed(c) && currentRuntime &&
                 new File(rootfs(c),"usr/bin/python3").exists() &&
@@ -46,8 +46,11 @@ public final class LinuxEnvironment {
                 new File(rootfs(c),"opt/term-agent/agent.py").isFile() &&
                 new File(rootfs(c),"opt/term-agent/system_prompt.md").isFile() &&
                 new File(rootfs(c),"opt/term-agent/provider_routes.py").isFile() &&
+                new File(rootfs(c),"opt/term-agent/providers.d/01-freellmpool.json").isFile() &&
                 new File(rootfs(c),"opt/term-agent/m4core/runtime.py").isFile() &&
                 new File(rootfs(c),"opt/term-agent/m4core/conversation.py").isFile() &&
+                new File(rootfs(c),"opt/term-agent/m4core/mcp.py").isFile() &&
+                new File(rootfs(c),"opt/term-agent/m4core/shell_worker.py").isFile() &&
                 new File(rootfs(c),"usr/local/bin/term-agent").isFile()){
             refreshDns(c);
             return;
@@ -99,7 +102,7 @@ public final class LinuxEnvironment {
                 throw new IOException("تعذر تفعيل ملفات لينكس");
             }
             Files.write(new File(root,".arabicterminal-installed").toPath(),
-                "Alpine 3.24.2 + agent-runtime-v4\n".getBytes(
+                "Alpine 3.24.2 + agent-runtime-v5\n".getBytes(
                     java.nio.charset.StandardCharsets.UTF_8));
             refreshDns(c);
             if(backup.exists())remove(backup);

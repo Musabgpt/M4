@@ -30,8 +30,14 @@ def main(folder):
         except subprocess.TimeoutExpired: os.killpg(process.pid, signal.SIGKILL); process.wait(timeout=1)
         except ProcessLookupError: pass
     try:
-        process = subprocess.Popen(config["argv"], cwd=config["root"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        process = subprocess.Popen(config["argv"], cwd=config["root"], stdin=subprocess.PIPE if config.get('stdin') is not None else subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, start_new_session=True)
+        if config.get('stdin') is not None:
+            def write_input():
+                try: process.stdin.write(config['stdin'].encode()); process.stdin.flush()
+                except (BrokenPipeError, OSError): pass
+                finally: process.stdin.close()
+            threading.Thread(target=write_input, daemon=True).start()
         save(folder/'state.json', row)
         def reader(stream, field):
             count = 0

@@ -18,12 +18,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.webkit.WebView
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 
 @Composable
 fun ArtifactChatCard(artifact: ChatArtifact) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var preview by remember { mutableStateOf<String?>(null) }
+    var previewImage by remember { mutableStateOf<Bitmap?>(null) }
+    DisposableEffect(artifact.id) { onDispose { previewImage?.recycle() } }
     var exporting by remember { mutableStateOf(false) }
     fun failure(message: String) { Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(artifact.mime)) { destination ->
@@ -68,10 +77,23 @@ fun ArtifactChatCard(artifact: ChatArtifact) {
                     try {
                         preview = withContext(Dispatchers.IO) {
                             val file = ArtifactRepository.file(context, artifact.id, artifact.name)
-                            if (artifact.mime == "application/zip") java.util.zip.ZipFile(file).use { zip ->
+                            if (artifact.mime.startsWith("image/")) {
+                                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }; BitmapFactory.decodeFile(file.absolutePath, bounds)
+                                val options = BitmapFactory.Options().apply { inSampleSize = (maxOf(bounds.outWidth, bounds.outHeight) / 1600).coerceAtLeast(1) }
+                                previewImage?.recycle(); previewImage = requireNotNull(BitmapFactory.decodeFile(file.absolutePath, options)); "صورة المرفق"
+                            } else if (artifact.mime == "application/pdf") {
+                                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor -> PdfRenderer(descriptor).use { renderer ->
+                                    require(renderer.pageCount > 0)
+                                    renderer.openPage(0).use { page ->
+                                        val scale = minOf(1200f / page.width, 1600f / page.height, 2f)
+                                        val bitmap = Bitmap.createBitmap((page.width * scale).toInt().coerceAtLeast(1), (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+                                        bitmap.eraseColor(android.graphics.Color.WHITE); page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                        previewImage?.recycle(); previewImage = bitmap
+                                    }; "الصفحة الأولى من ${renderer.pageCount} صفحات"
+                                } }
+                            } else if (artifact.mime == "application/zip") java.util.zip.ZipFile(file).use { zip ->
                                 zip.entries().asSequence().take(1000).joinToString("\n") { "${it.name} (${it.size})" }
-                            } else if (artifact.mime == "application/pdf") "PDF صالح؛ استخدم «فتح» لعرض الصفحات في عارض أندرويد."
-                            else file.inputStream().bufferedReader().use { it.readText().take(50000) }
+                            } else file.inputStream().bufferedReader().use { reader -> val chars = CharArray(50000); val n = reader.read(chars); if (n < 0) "" else String(chars, 0, n) }
                         }
                     } catch (e: Exception) { failure("تعذرت المعاينة: ${e.message}") }
                 } }) { Text("معاينة") }
@@ -83,7 +105,10 @@ fun ArtifactChatCard(artifact: ChatArtifact) {
     }
     preview?.let { value ->
         AlertDialog(onDismissRequest = { preview = null }, title = { Text(artifact.name) }, text = {
-            if (artifact.mime == "text/html") {
+            if (previewImage != null) Column {
+                Text(value)
+                Image(previewImage!!.asImageBitmap(), contentDescription = artifact.name, modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp), contentScale = ContentScale.Fit)
+            } else if (artifact.mime == "text/html") {
                 AndroidView(factory = { ctx -> WebView(ctx).apply {
                     settings.javaScriptEnabled = false
                     settings.allowFileAccess = false
