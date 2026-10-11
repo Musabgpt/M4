@@ -96,7 +96,11 @@ if not ready():
                             shutil.copyfileobj(src,dst)
                 if not os.path.isfile(os.path.join(staging,'newal_code','__main__.py')):
                     raise ValueError('NewAl Python package absent in pinned archive')
-                if not os.path.isdir(app_dir): os.replace(staging,app_dir)
+                # Replace only an incomplete prior installation; validated new
+                # archive contents are staged before old bytes are touched.
+                if os.path.isdir(app_dir):
+                    shutil.rmtree(app_dir)
+                os.replace(staging,app_dir)
             finally:
                 if os.path.isdir(staging): shutil.rmtree(staging)
         except Exception as error:
@@ -126,7 +130,7 @@ if not ready():
         if not ready(): raise RuntimeError('M4_BOOTSTRAP_SERVER_TIMEOUT')
 if phase=='setup':
     print(json.dumps({'status':'succeeded',
-        'content':'تم تجهيز وكيل NewAl داخل Termux وبدء خادمه المحلي بأمان.'},ensure_ascii=False))
+        'content':'تم تجهيز خادم NewAl داخل Termux. أرسل طلبك الآن؛ إذا لم يكن هناك نموذج متاح، ستحتاج لاختيار نموذج أو مزود.'},ensure_ascii=False))
     sys.exit(0)
 sessions_path=os.path.join(home,'.m4-newal-sessions.json')
 try:
