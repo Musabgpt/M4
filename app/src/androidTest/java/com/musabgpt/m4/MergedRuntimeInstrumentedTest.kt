@@ -34,9 +34,10 @@ class MergedRuntimeInstrumentedTest {
 
     @Test fun chatActionSheetExposesActualMediaAndInlineTerminal() {
         activity.onNodeWithTag("chat-plus").performClick()
-        activity.onNodeWithTag("chat-terminal-toggle").assertExists()
         activity.onNodeWithText("الكاميرا").assertExists()
         activity.onNodeWithText("المهارات والإضافات").assertExists()
+        activity.onNodeWithTag("chat-terminal-toggle").performClick()
+        activity.onNodeWithTag("inline-terminal").assertExists()
     }
 
     @Test fun firstMessageUsesRealPackagedPythonThroughTheVisibleSendButton() {
