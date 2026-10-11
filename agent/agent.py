@@ -163,7 +163,7 @@ def endpoint():
     selected=routes[0]
     return selected.base_url.rstrip("/")+"/chat/completions",selected.model
 
-def ask(url,model,messages):
+def ask(url,model,messages,allow_text=False,require_tools=False):
     # Only fixed catalog routes. Local services are never reached over a LAN.
     errors=[]
     for route in gateway_order(os.environ.get("M4_GATEWAY_FAMILY","freellmpool")):
@@ -180,8 +180,14 @@ def ask(url,model,messages):
                 # Coding requires a tool-capable route. A text-only reply cannot
                 # accomplish a file edit and must not stop gateway failover.
                 if not isinstance(reply.get("tool_calls"),list) or not reply["tool_calls"]:
-                    reply["tool_calls"] = prompted_calls(reply.get("content"), ACTIVE_REGISTRY)
-                    reply["m4_tool_mode"] = "prompted"
+                    try:
+                        reply["tool_calls"] = prompted_calls(reply.get("content"), ACTIVE_REGISTRY)
+                        reply["m4_tool_mode"] = "prompted"
+                    except ValueError:
+                        if not allow_text or require_tools:
+                            raise
+                        reply["tool_calls"] = []
+                        reply["m4_tool_mode"] = "text"
                 else:
                     reply["m4_tool_mode"] = "native"
                 for call in reply["tool_calls"]:
@@ -193,6 +199,37 @@ def ask(url,model,messages):
         except (OSError,KeyError,ValueError,IndexError,TypeError) as error:
             errors.append(route.name+": "+str(error)[:110])
     raise RuntimeError("No available tool-call gateway: "+"; ".join(errors[-4:]))
+
+def chat_turn(root, state, request, approved=False, permission_mode=None, max_steps=40):
+    """Execute ordinary chat through the same real registry and project lock."""
+    from m4core.conversation import request_messages, run_turn
+    request_messages(request)
+    global TOOLS, ACTIVE_REGISTRY
+    with (state / "active.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return dict(turn_id=request["turn_id"], owner_session_id=request["owner_session_id"],
+                        status="blocked", content="توجد مهمة أخرى تعمل في المشروع؛ أوقفها أو انتظر اكتمالها", tools=[], artifacts=[])
+        runtime = ToolRuntime(root, state, safe_path, backup, COMMANDS, command, approved, permission_mode)
+        TOOLS, ACTIVE_REGISTRY = runtime.registry.schemas, runtime.registry
+        db = history(state)
+        previous_owner = os.environ.get("M4_OWNER_SESSION")
+        os.environ["M4_OWNER_SESSION"] = request["owner_session_id"]
+        try:
+            result = run_turn(sys.modules[__name__], root, state, request, runtime, db, max_steps)
+            runtime.close()
+            log(db, "turn_finished", {"turn_id": request["turn_id"], "status": result["status"], "content": result["content"]})
+            save(state / "state.json", {"goal": request["messages"][-1]["content"], "phase": result["status"],
+                 "owner_session_id": request["owner_session_id"], "turn_id": request["turn_id"], "summary": result["content"]})
+            return result
+        finally:
+            runtime.close(); db.close()
+            if previous_owner is None:
+                os.environ.pop("M4_OWNER_SESSION", None)
+            else:
+                os.environ["M4_OWNER_SESSION"] = previous_owner
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 def verify(root,state,approved):
     checks=load(state/"checks.json",[])
@@ -410,6 +447,11 @@ def main():
     re.add_argument("--steps",type=int,default=30)
     re.add_argument("--allow-exec",action="store_true")
     re.add_argument("--permission-mode",choices=MODES)
+    chat=sub.add_parser("chat")
+    chat.add_argument("--request", required=True)
+    chat.add_argument("--steps", type=int, default=40)
+    chat.add_argument("--allow-exec", action="store_true")
+    chat.add_argument("--permission-mode", choices=MODES)
     sub.add_parser("status")
     sub.add_parser("tasks")
     sub.add_parser("doctor")
@@ -459,6 +501,15 @@ def main():
         return 0 if ok else 2
     if args.steps<1 or args.steps>500:
         raise ValueError("--steps must be between 1 and 500")
+    if args.action == "chat":
+        request_path = Path(args.request).expanduser().resolve()
+        private = (Path.home() / ".m4" / "chats").resolve()
+        if not request_path.is_relative_to(private) or request_path.stat().st_size > 500000:
+            raise ValueError("Chat request must be in the app-private conversation store")
+        request = load(request_path, {})
+        result = chat_turn(root, state, request, args.allow_exec, args.permission_mode, args.steps)
+        save(request_path.with_name("response.json"), result)
+        return 0 if result["status"] in {"completed", "planned"} else 2
     return loop(root,state,getattr(args,"goal",None),args.steps,args.allow_exec,args.permission_mode)
 
 if __name__=="__main__":

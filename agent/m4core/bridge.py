@@ -12,12 +12,15 @@ class AndroidBridge:
 
     def request(self, action, arguments=None):
         config = json.loads(self.config_path.read_text(encoding="utf-8"))
+        # Session identity is supplied by the host, never accepted from model args.
         request = json.dumps({"token": config["token"], "action": action,
+                              "owner_session_id": os.environ.get("M4_OWNER_SESSION", "terminal"),
+                              "turn_id": os.environ.get("M4_TURN_ID", "terminal"),
                               "arguments": arguments or {}}, ensure_ascii=False).encode() + b"\n"
         if len(request) > 1000000:
             raise ValueError("Bridge request too large")
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-            connection.settimeout(30)
+            connection.settimeout(180)
             connection.connect(config["socket"])
             connection.sendall(request)
             data = bytearray()

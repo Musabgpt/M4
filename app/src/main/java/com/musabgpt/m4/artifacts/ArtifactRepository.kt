@@ -108,6 +108,18 @@ object ArtifactRepository {
         return row
     }
 
+    fun saveBinary(context: Context, owner: String, name: String, mime: String, bytes: ByteArray): ChatArtifact {
+        require(validName(name) && bytes.size.toLong() in 1L..MAX_BYTES && mime in setOf("image/png", "image/jpeg", "image/webp", "application/pdf", "application/zip"))
+        val id = UUID.randomUUID().toString().replace("-", "")
+        val directory = File(root(context), id).apply { mkdirs() }
+        val file = File(directory, name).apply { writeBytes(bytes) }
+        if (mime.startsWith("image/")) require(android.graphics.BitmapFactory.decodeFile(file.absolutePath)?.also { it.recycle() } != null)
+        else validateFormat(file, mime)
+        val row = ChatArtifact(id, owner, name, mime, file.length(), hash(file), System.currentTimeMillis() / 1000.0)
+        File(directory, "manifest.json").writeText(row.json().toString())
+        return row
+    }
+
     fun hash(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { stream ->

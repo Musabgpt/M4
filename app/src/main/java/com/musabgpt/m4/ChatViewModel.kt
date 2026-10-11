@@ -11,6 +11,13 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.musabgpt.m4.terminal.EmbeddedAlpineBackend
+import com.musabgpt.m4.phone.PhoneIntent
+import com.musabgpt.m4.phone.AndroidPhoneTools
+import com.musabgpt.m4.runtime.ChatEventStream
+import com.musabgpt.m4.runtime.CapabilityBroker
 
 data class UiMessage(
     val id: String = UUID.randomUUID().toString(),
@@ -24,6 +31,7 @@ data class Conversation(
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
+    val terminal = EmbeddedAlpineBackend(app, viewModelScope)
     private val prefs = app.getSharedPreferences("m4_chats", 0)
     // Four built-in source families only. No local model import, custom API or keys.
     private val _providers = MutableStateFlow(ProviderCatalog.all)
@@ -34,13 +42,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val _activeRoute = MutableStateFlow("")
     val activeRoute = _activeRoute.asStateFlow()
     private val _permissionMode = MutableStateFlow(prefs.getString("permission_mode", "auto_project")
-        ?.takeIf { it in setOf("auto_project", "plan_only") } ?: "auto_project")
+        ?.takeIf { it in setOf("auto_project", "plan_only", "ask_always", "accept_edits") } ?: "auto_project")
     val permissionMode = _permissionMode.asStateFlow()
     fun setPlanMode(plan: Boolean) {
         _permissionMode.value = if (plan) "plan_only" else "auto_project"
         prefs.edit().putString("permission_mode", _permissionMode.value).apply()
     }
+    fun setPermissionMode(mode: String) {
+        require(mode in setOf("auto_project", "plan_only", "ask_always", "accept_edits"))
+        _permissionMode.value = mode
+        prefs.edit().putString("permission_mode", mode).apply()
+    }
+    private var currentTurn: String? = null
+    fun pause() { currentTurn?.let { terminal.control(it, "pause") } }
+    fun resume() { currentTurn?.let { terminal.control(it, "resume") } }
+    fun steer(text: String) { currentTurn?.let { terminal.control(it, "steer", text) } }
     init {
+        com.musabgpt.m4.runtime.AgentControl.onStop = { stop() }
         // Legacy configuration has no meaning and may contain old API secrets.
         val editor = prefs.edit()
         for (old in listOf("Kilo Auto Free", "Groq", "Gemini", "OpenRouter", "Custom")) {
@@ -109,7 +127,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun stop() {
-        ChatApi.stop()
+        CapabilityBroker.cancel()
+        terminal.interruptAgent()
         job?.cancel()
     }
 
@@ -129,7 +148,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (clean == "/clear") { newChat(); return }
             if (clean == "/plan") setPlanMode(_permissionMode.value != "plan_only")
             val result = when (clean) {
-                "/help" -> "الأوامر: /help، /plan، /permissions، /clear.\nاكتب ! ثم أمر الطرفية لتنفيذه صراحةً. «تنفيذ كود» يشغل الوكيل الحقيقي؛ مرفقاته ونتائج الأدوات تظهر هنا."
+                "/help" -> "اكتب طلبك مباشرة؛ المحادثة تستخدم أدوات الهاتف والملفات والطرفية. ! ينفذ أمرًا صريحًا. /plan للتخطيط، /permissions للصلاحيات، /tools للأدوات، /doctor للقدرات، /clear لمحادثة جديدة."
                 else -> if (_permissionMode.value == "plan_only") "وضع الوكيل: تخطيط للقراءة فقط" else "وضع الوكيل: تنفيذ داخل المشروع بعد موافقة التشغيل"
             }
             edit(_currentId.value) { c -> c.copy(messages = c.messages + UiMessage(role = "user", content = clean) + UiMessage(role = "assistant", content = result)) }
@@ -144,22 +163,34 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
         saveHistory()
         val conv = _conversations.value.first { it.id == convId }
-        val history = conv.messages.dropLast(1).map { ChatMessage(it.role, it.content) }
+        val history = JSONArray().apply { conv.messages.dropLast(1).takeLast(32).forEach { put(JSONObject().put("role", it.role).put("content", it.content)) } }
         val primary = selected
+        val turnId = UUID.randomUUID().toString()
+        currentTurn = turnId
         _activeRoute.value = ""
         _streaming.value = true
         job = viewModelScope.launch {
             try {
-                ChatApi.stream(primary, history).collect { event ->
-                    when (event) {
-                        is ChatEvent.Route -> _activeRoute.value = "الاستجابة عبر: " + event.name
-                        is ChatEvent.Text -> edit(convId) { c ->
-                            c.copy(messages = c.messages.map {
-                                if (it.id == reply.id) it.copy(content = it.content + event.value) else it
-                            })
+                val target = PhoneIntent.openTarget(clean)
+                val result = if (target != null && _permissionMode.value != "plan_only") {
+                    val args = JSONObject().put("app", target)
+                    withContext(Dispatchers.IO) { ChatEventStream.append(getApplication(), convId, turnId, "tool_started", JSONObject().put("tool", "PhoneOpenApp").put("args", args)) }
+                    val allowed = _permissionMode.value != "ask_always" || withContext(Dispatchers.IO) { CapabilityBroker.request(convId, "فتح تطبيق", args) }
+                    val observed = if (allowed) AndroidPhoneTools.openApp(getApplication(), target)
+                        else JSONObject().put("status", "denied").put("error", "رفضت فتح التطبيق")
+                    withContext(Dispatchers.IO) { ChatEventStream.append(getApplication(), convId, turnId, "tool_finished", JSONObject().put("tool", "PhoneOpenApp").put("args", args).put("result", observed.toString()).put("ok", observed.optString("status") == "dispatched")) }
+                    JSONObject().put("content", observed.optString("message", observed.optString("error", "تعذر فتح التطبيق")))
+                } else {
+                    val request = JSONObject().put("owner_session_id", convId).put("turn_id", turnId).put("messages", history)
+                    terminal.chat(request, primary.id, _permissionMode.value) { event ->
+                        if (event.kind == "provider_route") {
+                            _activeRoute.value = "المسار الفعلي: " + event.result
+                        } else if (event.kind == "token") edit(convId) { c ->
+                            c.copy(messages = c.messages.map { if (it.id == reply.id) it.copy(content = it.content + event.result) else it })
                         }
                     }
                 }
+                edit(convId) { c -> c.copy(messages = c.messages.map { if (it.id == reply.id) it.copy(content = result.optString("content", "لا توجد نتيجة مسجلة")) else it }) }
             } catch (cancel: CancellationException) {
                 edit(convId) { c ->
                     c.copy(messages = c.messages.map {
@@ -175,6 +206,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } finally {
                 _streaming.value = false
+                currentTurn = null
                 saveHistory()
             }
         }
@@ -182,6 +214,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         stop()
+        terminal.detach()
         super.onCleared()
     }
 }

@@ -37,7 +37,7 @@ public final class UiControlService extends AccessibilityService {
     private WindowManager.LayoutParams params;
     private boolean expanded;
 
-    static UiControlService current(){return instance;}
+    public static UiControlService current(){return instance;}
     @Override public void onServiceConnected(){
         super.onServiceConnected();
         instance=this;
@@ -46,7 +46,7 @@ public final class UiControlService extends AccessibilityService {
     @Override public void onAccessibilityEvent(AccessibilityEvent event){
         // Do not capture or store event content.
     }
-    @Override public void onInterrupt(){}
+    @Override public void onInterrupt(){com.musabgpt.m4.runtime.AgentControl.stop();}
     private Button button(String name,Runnable click){
         Button b=new Button(this);
         b.setAllCaps(false);b.setText(name);b.setTextSize(12);b.setMinWidth(0);
@@ -78,6 +78,7 @@ public final class UiControlService extends AccessibilityService {
         expanded=false;
         overlay.removeAllViews();
         overlay.addView(button("⌨ عربي",this::expand));
+        overlay.addView(button("⏹ إيقاف",com.musabgpt.m4.runtime.AgentControl::stop));
         params.flags=WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
         wm.updateViewLayout(overlay,params);
@@ -88,6 +89,7 @@ public final class UiControlService extends AccessibilityService {
         overlay.removeAllViews();
         LinearLayout header=new LinearLayout(this);
         header.addView(button("✕ إخفاء",this::collapse));
+        header.addView(button("⏹ إيقاف",com.musabgpt.m4.runtime.AgentControl::stop));
         header.addView(button("⌂ الرئيسية",()->runAction("الرئيسية")));
         header.addView(button("↩ رجوع",()->runAction("ارجع")));
         overlay.addView(header);

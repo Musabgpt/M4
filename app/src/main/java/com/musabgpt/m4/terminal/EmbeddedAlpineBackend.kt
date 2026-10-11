@@ -14,6 +14,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.first
+import org.json.JSONObject
+import com.musabgpt.m4.runtime.ChatEventStream
+import com.musabgpt.m4.runtime.RuntimeEvent
 import java.io.File
 import java.util.UUID
 
@@ -32,6 +38,8 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
     private var binding = false
     private var pendingGoal: Pair<String, String>? = null
     private var pendingCommand: String? = null
+    private var chatSession: TerminalService.Session? = null
+    private var activeTurn: String? = null
     private val mutable = MutableStateFlow(TerminalSnapshot())
     val state = mutable.asStateFlow()
     private val observer = Runnable { refresh() }
@@ -41,7 +49,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
             bound = true
             binding = false
             service?.addListener(observer)
-            if (service?.sessions()?.isEmpty() == true) prepare() else ready()
+            prepare()
         }
         override fun onServiceDisconnected(name: ComponentName) {
             service = null
@@ -69,7 +77,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
             try {
                 withContext(Dispatchers.IO) { LinuxEnvironment.install(context.applicationContext) }
                 if (service == null) return@launch
-                service?.create(false, true, 24, 80)
+                if (service?.sessions()?.none { it.isLinux && !it.isFinished } == true) service?.create(false, true, 24, 80)
                 ready()
             } catch (e: Exception) { failure(e.message) }
             catch (e: LinkageError) { failure(e.message) }
@@ -116,6 +124,18 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
     fun select(session: TerminalService.Session) { service?.select(session) }
     fun sendInput(text: String) { service?.write(service?.selected(), text) }
     fun interrupt() { sendInput("\u0003") }
+    fun interruptAgent() {
+        activeTurn?.let { turn -> control(turn, "stop") }
+        service?.write(chatSession, "\u0003")
+    }
+    fun control(turn: String, action: String, text: String = "") {
+        require(action in setOf("pause", "resume", "stop", "steer"))
+        val directory = File(LinuxEnvironment.rootfs(context), "root/projects/M4/.term-agent")
+        if (!directory.isDirectory) return
+        val temporary = File(directory, "control.json.tmp")
+        temporary.writeText(JSONObject().put("turn_id", turn).put("action", action).put("text", text.take(6000)).toString())
+        temporary.renameTo(File(directory, "control.json"))
+    }
     fun closeSession() { service?.close(service?.selected()) }
     fun resize(rows: Int, columns: Int) { service?.resize(service?.selected(), rows, columns) }
 
@@ -129,6 +149,50 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
         if (goal.isBlank() || goal.length > 6000) { failure("الهدف فارغ أو طويل جداً"); return }
         if (service == null) { pendingGoal = goal to owner; open(); return }
         launchAgent(goal, owner)
+    }
+
+    /** A normal chat turn uses the real packaged agent, not a separate text API. */
+    suspend fun chat(request: JSONObject, family: String, mode: String, event: (RuntimeEvent) -> Unit): JSONObject {
+        require(family in setOf("freellmpool", "gpt4free", "free-llm-gateway", "free-llm-api"))
+        require(mode in setOf("auto_project", "plan_only", "ask_always", "accept_edits"))
+        open()
+        withTimeout(120000) { state.first { !it.preparing && (it.sessions.isNotEmpty() || it.status.startsWith("تعذرت")) } }
+        val current = service ?: error("لم تتصل خدمة الطرفية")
+        require(LinuxEnvironment.installed(context)) { state.value.status }
+        val owner = request.getString("owner_session_id")
+        val turn = request.getString("turn_id")
+        require(owner.matches(Regex("[A-Za-z0-9-]{1,80}")) && turn.matches(Regex("[A-Za-z0-9-]{1,80}")))
+        val directory = File(LinuxEnvironment.rootfs(context), "root/.m4/chats/$owner/$turn")
+        withContext(Dispatchers.IO) { directory.mkdirs(); File(directory, "request.json").writeText(request.toString()) }
+        val session = chatSession?.takeIf { !it.isFinished && current.sessions().contains(it) }
+            ?: current.create(false, true, 24, 80).also { chatSession = it }
+        val config = File(directory, "provider.env")
+        config.writeText("export M4_GATEWAY_FAMILY=${quote(family)}\nexport M4_OWNER_SESSION=${quote(owner)}\nexport M4_TURN_ID=${quote(turn)}\nexport M4_PERMISSION_MODE=${quote(mode)}\n")
+        config.setReadable(false, false); config.setWritable(false, false)
+        config.setReadable(true, true); config.setWritable(true, true)
+        activeTurn = turn
+        val guestDirectory = "/root/.m4/chats/$owner/$turn"
+        current.write(session, "M4_AGENT_PROVIDER_FILE=${quote("$guestDirectory/provider.env")} m4-agent-start --chat ${quote("$guestDirectory/request.json")}\n")
+        var last = 0L
+        try {
+            return withTimeout(660000) {
+                while (true) {
+                    val rows = withContext(Dispatchers.IO) { ChatEventStream.read(context, owner, turn, 300) }
+                    rows.filter { it.id > last }.forEach { row -> event(row); last = maxOf(last, row.id) }
+                    val response = withContext(Dispatchers.IO) {
+                        File(directory, "response.json").takeIf { it.isFile && it.length() in 1..1500000 }?.readText()
+                    }
+                    if (response != null) return@withTimeout JSONObject(response)
+                    if (session.isFinished) error("انتهت جلسة الوكيل قبل حفظ النتيجة؛ راجع الطرفية")
+                    delay(180)
+                }
+                @Suppress("UNREACHABLE_CODE") JSONObject()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            control(turn, "stop")
+            current.write(session, "\u0003")
+            throw e
+        } finally { activeTurn = null; config.delete() }
     }
 
     private fun launchAgent(goal: String, owner: String) {

@@ -25,13 +25,21 @@ import kotlinx.coroutines.withContext
 
 /** Chat, real terminal, files, browser and durable tasks share this Activity. */
 class M4ChatActivity : ComponentActivity() {
-    private lateinit var terminal: EmbeddedAlpineBackend
+    private lateinit var browser: com.musabgpt.m4.browser.BrowserController
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        terminal = EmbeddedAlpineBackend(this, lifecycleScope)
+        browser = com.musabgpt.m4.browser.BrowserController(this)
         setContent {
             ChatTheme {
                 val vm: ChatViewModel = viewModel()
+                val terminal = vm.terminal
+                val approval by com.musabgpt.m4.runtime.CapabilityBroker.pending.collectAsState()
+                approval?.let { request ->
+                    AlertDialog(onDismissRequest = { com.musabgpt.m4.runtime.CapabilityBroker.resolve(request.id, false) },
+                        title = { Text("موافقة: ${request.action}") }, text = { Text(request.details) },
+                        confirmButton = { TextButton(onClick = { com.musabgpt.m4.runtime.CapabilityBroker.resolve(request.id, true) }) { Text("السماح مرة") } },
+                        dismissButton = { TextButton(onClick = { com.musabgpt.m4.runtime.CapabilityBroker.resolve(request.id, false) }) { Text("رفض") } })
+                }
                 val owner by vm.currentId.collectAsState()
                 var panel by rememberSaveable { mutableStateOf("chat") }
                 var attachments by remember { mutableStateOf(emptyList<ChatArtifact>()) }
@@ -51,13 +59,13 @@ class M4ChatActivity : ComponentActivity() {
                     Box(Modifier.weight(1f)) {
                         when (panel) {
                             "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
-                                runAgent = { goal -> vm.recordTerminalRequest(goal); terminal.runAgent(goal, owner); panel = "terminal" },
+                                runAgent = { goal -> vm.send(goal) },
                                 readAgentProgress = { AgentProgressStore.read(this@M4ChatActivity) },
                                 artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, vm = vm)
                             "terminal" -> TerminalPanel(terminal)
                             "files" -> FilesPanel()
                             "tasks" -> SchedulerPanel(owner)
-                            "browser" -> BrowserPanel()
+                            "browser" -> BrowserPanel(browser)
                         }
                     }
                     HorizontalDivider()
@@ -72,8 +80,5 @@ class M4ChatActivity : ComponentActivity() {
             }
         }
     }
-    override fun onDestroy() {
-        terminal.detach()
-        super.onDestroy()
-    }
+    override fun onDestroy() { browser.close(); super.onDestroy() }
 }

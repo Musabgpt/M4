@@ -17,12 +17,19 @@ def tool(name, description, properties=None, required=()):
 class Registry:
     def __init__(self):
         self.entries = {}
+        self.metadata = {}
 
-    def register(self, descriptor, handler):
+    def register(self, descriptor, handler, metadata=None):
         name = descriptor["function"]["name"]
         if name in self.entries:
             raise ValueError("Duplicate tool: " + name)
         self.entries[name] = (descriptor, handler)
+        self.metadata[name] = {"version": "1", "risk_level": "read", "capabilities": [],
+            "requires_user_consent": False, "timeout": 90, "result_schema": {"type": ["object", "string"]}, **(metadata or {})}
+
+    def unregister(self, name):
+        self.entries.pop(name, None)
+        self.metadata.pop(name, None)
 
     @property
     def schemas(self):

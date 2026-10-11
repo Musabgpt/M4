@@ -2,8 +2,14 @@
 # Start a coding task against the ACTUAL M4 sources, never an empty demo folder.
 # Alpine/PRoot runtime. No Termux, privileged shell or Android root required.
 set -eu
+export M4_MEMORY_HOME=/root/.m4/memory
 umask 077
 goal="${1:-}"
+chat_request=""
+if [ "$goal" = "--chat" ]; then
+  chat_request="${2:-}"
+  test -n "$chat_request" || { echo "Missing chat request" >&2; exit 2; }
+fi
 if [ -z "$goal" ]; then
   echo "Missing coding goal: m4-agent-start 'Describe a task'" >&2
   exit 2
@@ -53,6 +59,12 @@ esac
 echo "Project source: $project"
 echo "Independent Python agent checks configured. Android APK build runs in GitHub CI."
 if [ "${M4_PERMISSION_MODE:-auto_project}" = "plan_only" ]; then
+  if [ -n "$chat_request" ]; then
+    exec term-agent chat --request "$chat_request" --steps 40 --permission-mode plan_only
+  fi
   exec term-agent run "$goal" --steps 40 --permission-mode plan_only
+fi
+if [ -n "$chat_request" ]; then
+  exec term-agent chat --request "$chat_request" --steps 40 --allow-exec --permission-mode "${M4_PERMISSION_MODE:-auto_project}"
 fi
 exec term-agent run "$goal" --steps 40 --allow-exec
