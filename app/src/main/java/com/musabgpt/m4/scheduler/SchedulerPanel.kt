@@ -62,7 +62,11 @@ fun SchedulerPanel(owner: String) {
             listOf("app_started" to "فتح التطبيق", "chat_finished" to "انتهاء محادثة", "artifact_created" to "إنشاء مرفق").forEach { (key, label) -> TextButton(onClick = { event = key }) { Text((if (event == key) "● " else "") + label) } }
         }
         if (type == "condition_watch") {
-            Row(Modifier.horizontalScroll(rememberScrollState())) { listOf("charging" to "الشحن", "battery_above" to "البطارية", "network_connected" to "اتصال الشبكة").forEach { (key, label) -> TextButton(onClick = { condition = key }) { Text((if (condition == key) "● " else "") + label) } }
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                listOf("charging" to "الشحن", "battery_above" to "البطارية", "network_connected" to "اتصال الشبكة").forEach { (key, label) ->
+                    TextButton(onClick = { condition = key }) { Text((if (condition == key) "● " else "") + label) }
+                }
+            }
             if (condition == "battery_above") OutlinedTextField(percent, { percent = it }, label = { Text("أقل نسبة بطارية") })
         }
         if (type == "on_ci_event") OutlinedTextField(repository, { repository = it }, label = { Text("مستودع GitHub: owner/repo") })
