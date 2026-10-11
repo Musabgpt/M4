@@ -65,14 +65,17 @@ class NewAlFixture(http.server.BaseHTTPRequestHandler):
         if path == "/api/sessions/contract-session/send":
             st["send_calls"] += 1
             st["message"] = payload["text"]
+            st["turn"] += 1
             st["current"] = True
             return self.respond({"started": True, "session": "contract-session"})
         if path == "/api/sessions/contract-session":
-            old = {"type": "turn_end", "turn": 5, "answer": "STALE-PRIOR-ANSWER"}
-            fresh = {"type": "turn_end", "turn": 6, "answer": "NEW-VERIFIED-ANSWER"}
+            old = {"type": "turn_end", "turn": st["turn"] - 1, "answer": "STALE-PRIOR-ANSWER"}
+            fresh = {"type": "turn_end", "turn": st["turn"],
+                     "answer": "NEW-VERIFIED-ANSWER-" + str(st["turn"])}
             return self.respond({
-                "meta": {"turn": 6 if st["current"] else 5},
-                "events": [old, fresh] if st["current"] else [old],
+                "meta": {"turn": st["turn"]},
+                "events": [old, fresh] if st["current"] else [
+                    {"type": "turn_end", "turn": 5, "answer": "STALE-PRIOR-ANSWER"}],
                 "busy": False,
                 "approvals": [],
             })
@@ -102,7 +105,8 @@ class TermuxNewAlContractTest(unittest.TestCase):
             key.parent.mkdir()
             key.write_text("m4-test-session-key")
             os.chmod(key, 0o600)
-            state = {"send_calls": 0, "mode_updates": 0, "current": False, "message": ""}
+            state = {"send_calls": 0, "mode_updates": 0, "turn": 5,
+                     "current": False, "message": ""}
             handler = type("ScopedNewAlFixture", (NewAlFixture,), {"state": state})
             server = http.server.ThreadingHTTPServer(("127.0.0.1", 8791), handler)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -119,12 +123,25 @@ class TermuxNewAlContractTest(unittest.TestCase):
                 )
                 self.assertEqual(run.returncode, 0, run.stderr)
                 receipt = json.loads(run.stdout.strip())
-                self.assertEqual(receipt["content"], "NEW-VERIFIED-ANSWER")
+                self.assertEqual(receipt["content"], "NEW-VERIFIED-ANSWER-6")
                 self.assertEqual(receipt["status"], "succeeded")
                 self.assertEqual(state["send_calls"], 1)
                 self.assertEqual(state["message"], "افتح المشروع")
                 self.assertEqual(state["mode"], "read-only")
                 self.assertEqual(state["mode_updates"], 1)
+                # Reuse the same persisted session, changing the M4 permission.
+                second = subprocess.run(
+                    [sys.executable, "-c", embedded_worker(), "test-owner",
+                     __import__("base64").b64encode("راجع المشروع".encode()).decode(),
+                     "ask_always"],
+                    capture_output=True, text=True, timeout=12, env=environment,
+                )
+                self.assertEqual(second.returncode, 0, second.stderr)
+                next_receipt = json.loads(second.stdout.strip())
+                self.assertEqual(next_receipt["content"], "NEW-VERIFIED-ANSWER-7")
+                self.assertEqual(state["mode"], "ask")
+                self.assertEqual(state["mode_updates"], 2)
+                self.assertEqual(state["send_calls"], 2)
             finally:
                 server.shutdown()
                 server.server_close()
