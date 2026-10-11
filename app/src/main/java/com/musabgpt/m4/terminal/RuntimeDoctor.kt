@@ -33,7 +33,7 @@ object RuntimeDoctor {
         var healthy = true
         for (check in checks) {
             if (stopped()) return Result(false, "تم إيقاف التشخيص.")
-            val result = AlpineCommandRunner.run(context, check.command, stopped)
+            val result = AlpineCommandRunner.run(context, check.command, stopped, timeoutSeconds = 12L)
             val output = (result.stdout + "\n" + result.stderr).trim().take(350)
             val success = result.status == "succeeded" && result.exitCode == 0 &&
                 check.expected.containsMatchIn(output)
