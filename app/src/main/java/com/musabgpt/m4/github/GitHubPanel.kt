@@ -22,6 +22,8 @@ import kotlinx.coroutines.withContext
     var clientId by remember { mutableStateOf(context.getSharedPreferences("m4_github", 0).getString("client_id", "").orEmpty()) }
     var code by remember { mutableStateOf("") }
     var repository by remember { mutableStateOf("Musabgpt/M4") }
+    var repoOwner by remember { mutableStateOf("Musabgpt") }
+    var availableRepositories by remember { mutableStateOf(emptyList<String>()) }
     var busy by remember { mutableStateOf(false) }
     var canceled by remember { mutableStateOf(false) }
     var artifactId by remember { mutableStateOf("") }
@@ -48,6 +50,28 @@ import kotlinx.coroutines.withContext
         }) { Text("ربط الحساب عبر GitHub") }
         if (code.isNotBlank()) Text("رمز التفويض: $code", style = MaterialTheme.typography.headlineMedium)
         if (busy) TextButton(onClick = { canceled = true }) { Text("إلغاء التفويض") }
+        Text("استكشاف مستودعات GitHub الحقيقية", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(repoOwner, { repoOwner = it.trim().take(39) },
+            label = { Text("اسم حساب GitHub") })
+        Button(enabled = !busy, onClick = {
+            busy = true
+            scope.launch {
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        client.call("repositories", org.json.JSONObject().put("owner", repoOwner), owner)
+                    }
+                    val items = result.getJSONArray("data")
+                    availableRepositories = (0 until items.length()).map {
+                        items.getJSONObject(it).getString("full_name")
+                    }
+                    status = "تم العثور على " + availableRepositories.size + " مستودع."
+                } catch (e: Exception) { status = "تعذّر عرض المستودعات: " + e.message }
+                finally { busy = false }
+            }
+        }) { Text("عرض المستودعات") }
+        availableRepositories.forEach { fullName ->
+            TextButton(onClick = { repository = fullName }) { Text(fullName) }
+        }
         OutlinedTextField(repository, { repository = it }, label = { Text("المستودع") })
         TextButton(enabled = !busy, onClick = { scope.launch {
             try { status = withContext(Dispatchers.IO) { client.call("runs", org.json.JSONObject().put("repository", repository), owner).toString(2) } }
