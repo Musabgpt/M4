@@ -158,10 +158,10 @@ fun ChatScreen(
                 }
                 HorizontalDivider()
                 TextButton(onClick = { addSheet = false; openPanel("browser") }) { Text("البحث والمتصفح") }
-                TextButton(onClick = { addSheet = false; toggleTerminal() }) { Text("الطرفية داخل المحادثة") }
+                TextButton(onClick = { addSheet = false; toggleTerminal() }, modifier = Modifier.testTag("chat-terminal-toggle")) { Text("الطرفية داخل المحادثة") }
                 TextButton(onClick = { addSheet = false; openPanel("tools") }) { Text("المهارات والإضافات") }
                 TextButton(onClick = { addSheet = false; openPanel("tasks") }) { Text("المهام المجدولة") }
-                TextButton(onClick = { addSheet = false; showAgentConfirm = true }) { Text("تنفيذ المشروع باستخدام الأدوات") }
+                TextButton(onClick = { addSheet = false; showAgentConfirm = true }, enabled = input.isNotBlank() && !isStreaming) { Text("تنفيذ المشروع باستخدام الأدوات") }
                 TextButton(onClick = { addSheet = false; permissionsOpen = true }) { Text("صلاحيات الوكيل") }
             }
         }
@@ -624,7 +624,7 @@ private fun InputBar(
                 Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
-                TextButton(onClick = onAttach, enabled = !isStreaming, contentPadding = PaddingValues(4.dp)) { Text("+", style = MaterialTheme.typography.titleLarge) }
+                TextButton(onClick = onAttach, enabled = !isStreaming, modifier = Modifier.testTag("chat-plus"), contentPadding = PaddingValues(4.dp)) { Text("+", style = MaterialTheme.typography.titleLarge) }
                 BasicTextField(
                     value = text,
                     onValueChange = onTextChange,
