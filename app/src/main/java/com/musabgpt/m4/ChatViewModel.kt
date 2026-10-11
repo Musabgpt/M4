@@ -229,7 +229,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String) {
         val clean = text.trim()
         if (clean.isEmpty() || _streaming.value) return
-        if (clean in setOf("/terminal", "/phone", "/browser", "/github", "/tasks", "/termux", "/schedule")) { _requestedPanel.value = when(clean) { "/schedule" -> "tasks"; "/termux" -> "tools"; "/phone" -> "tools"; else -> clean.drop(1) }; return }
+        if (clean in setOf("/terminal", "/phone", "/browser", "/github", "/tasks", "/termux", "/schedule", "/tools", "/files")) {
+            _requestedPanel.value = when (clean) {
+                "/schedule" -> "tasks"
+                "/termux" -> "terminal" // Opens M4\'s integrated Linux terminal; /doctor identifies the actual engine.
+                "/phone" -> "tools"
+                else -> clean.drop(1)
+            }
+            return
+        }
         if (clean == "/doctor") {
             val owner = _currentId.value
             val answer = UiMessage(role = "assistant", content = "جارٍ فحص الأدوات المحلية فعلياً...")
