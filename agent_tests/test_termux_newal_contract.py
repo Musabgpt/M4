@@ -101,6 +101,7 @@ class TermuxNewAlContractTest(unittest.TestCase):
     def test_consent_round_trip_does_not_resend_user_message(self):
         import base64
         with socket.socket() as port:
+            port.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 port.bind(("127.0.0.1", 8791))
             except OSError as error:
@@ -143,6 +144,7 @@ class TermuxNewAlContractTest(unittest.TestCase):
 
     def test_authenticated_new_turn_never_returns_stale_receipt(self):
         with socket.socket() as check:
+            check.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 check.bind(("127.0.0.1", 8791))
             except OSError as error:
