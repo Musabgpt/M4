@@ -1,6 +1,6 @@
 # M4 v2 — MusabAI Cursor-style Workbench
 
-A native Android ARM64 app with the user-supplied warm-paper/dark Compose chat design, a Cursor-style coding workbench, the embedded Arabic Terminal (Alpine Linux + PRoot + PTY), and a bounded AI coding agent. Everything in this repository is authored and built from **Musabgpt/M4**; upstream source repos are only references.
+A native Android ARM64 app with a dark Compose coding workbench, the embedded Arabic Terminal (Alpine Linux + PRoot + PTY), and a bounded AI coding agent. Everything in this repository is authored and built from **Musabgpt/M4**; upstream source repos are only references.
 
 ## One interface, fixed source families
 
@@ -17,7 +17,12 @@ Selecting an unavailable loopback family transparently falls back to FreeLLMPool
 
 ## Cursor-style workbench and runtime
 
-The launcher includes a Cursor-style workbench: Composer actions for planning, inline editing, explanation, refactoring, test generation, debugging and review; a project file editor; the embedded Alpine/PRoot/PTY terminal; browser; tasks; skills, tools, MCP and hooks; and native GitHub and GitLab panels. Every surface is available from the Cursor panel or a single bottom-navigation button. `!command` submits an explicit manual command and **تنفيذ كود** starts the coding agent in its own PTY session. `/cursor`, `/plan`, `/permissions` and `/help` are available from chat.
+The launcher opens Explorer inside a persistent workbench frame. The activity rail
+opens Agent, GitHub, the embedded terminal, Extensions and Preview. The command
+navigator also opens GitLab, scheduled tasks and optional Termux. The editor has
+multiple buffers and review-before-save; Ask Agent includes the current buffer.
+`!command` submits an explicit manual command and **تنفيذ كود** starts the coding
+agent in its own PTY session. `/cursor` opens Explorer.
 
 GitHub uses the existing Device Flow and GitLab uses an HTTPS Personal Access Token stored in Android Keystore. Read operations are exposed to the agent as native tools; issue, merge-request, pipeline and push operations pass through the approval broker and produce a result receipt. No token is sent to the model.
 

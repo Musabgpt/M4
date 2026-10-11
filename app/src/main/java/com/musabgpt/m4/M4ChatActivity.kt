@@ -53,7 +53,7 @@ class M4ChatActivity : ComponentActivity() {
                         dismissButton = { TextButton(onClick = { com.musabgpt.m4.runtime.CapabilityBroker.resolve(request.id, false) }) { Text("رفض") } })
                 }
                 val owner by vm.currentId.collectAsState()
-                var panel by rememberSaveable { mutableStateOf("chat") }
+                var panel by rememberSaveable { mutableStateOf("files") }
                 val requestedPanel by vm.requestedPanel.collectAsState()
                 LaunchedEffect(requestedPanel) { requestedPanel?.let { panel = it; vm.consumedPanel() } }
                 browser.onNavigate = { panel = "browser" }

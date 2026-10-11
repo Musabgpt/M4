@@ -60,6 +60,7 @@ class MergedRuntimeInstrumentedTest {
             vm.selectProvider(gpt4free)
         }
         try {
+            activity.onNodeWithTag("workbench-chat").performClick()
             activity.onNodeWithTag("chat-input").performTextInput("مرحبا")
             activity.onNodeWithTag("chat-send").performClick()
             try {
