@@ -33,7 +33,7 @@ object AndroidPhoneTools {
             .put("screen_verified", false).put("message", "أرسلت أمر فتح «${app.label}» إلى أندرويد")
     }
 
-    fun dispatch(context: Context, action: String, arguments: JSONObject, owner: String, turn: String): JSONObject {
+    fun dispatch(context: Context, action: String, arguments: JSONObject, owner: String, turn: String, allowSetup: Boolean = true): JSONObject {
         if (action == "list_apps") return listApps(context)
         if (action in PhonePublicIntents.actions) return PhonePublicIntents.dispatch(context, action, arguments, owner)
         val goal = CapabilityBroker.explicitGoal(context, owner, turn).orEmpty()
@@ -44,7 +44,7 @@ object AndroidPhoneTools {
                 return JSONObject().put("status", "denied").put("error", "لم يسمح المستخدم بفتح هذا التطبيق")
             return onMain { openApp(context, target) }
         }
-        return PhoneAccessibilityTools.dispatch(context, action, arguments, owner)
+        return PhoneAccessibilityTools.dispatch(context, action, arguments, owner, allowSetup)
     }
 
     fun <T> onMain(block: () -> T): T {

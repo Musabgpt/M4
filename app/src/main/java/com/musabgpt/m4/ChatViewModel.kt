@@ -22,7 +22,9 @@ import com.musabgpt.m4.runtime.CapabilityBroker
 data class UiMessage(
     val id: String = UUID.randomUUID().toString(),
     val role: String,
-    val content: String
+    val content: String,
+    val turnId: String = "",
+    val attachments: List<String> = emptyList()
 )
 data class Conversation(
     val id: String = UUID.randomUUID().toString(),
@@ -44,6 +46,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val _permissionMode = MutableStateFlow(prefs.getString("permission_mode", "auto_project")
         ?.takeIf { it in setOf("auto_project", "plan_only", "ask_always", "accept_edits") } ?: "auto_project")
     val permissionMode = _permissionMode.asStateFlow()
+    private val _requestedPanel = MutableStateFlow<String?>(null)
+    val requestedPanel = _requestedPanel.asStateFlow()
+    fun consumedPanel() { _requestedPanel.value = null }
+    private val _pendingAttachments = MutableStateFlow(emptyList<com.musabgpt.m4.artifacts.ChatArtifact>())
+    val pendingAttachments = _pendingAttachments.asStateFlow()
+    fun attach(uri: android.net.Uri) { viewModelScope.launch {
+        try {
+            val artifact = withContext(Dispatchers.IO) { com.musabgpt.m4.artifacts.ArtifactRepository.importDocument(getApplication(), _currentId.value, uri) }
+            _pendingAttachments.value = (_pendingAttachments.value + artifact).distinctBy { it.id }.takeLast(8)
+        } catch (e: Exception) { edit(_currentId.value) { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "تعذر استيراد المرفق: ${e.message}")) }; saveHistory() }
+    } }
+    fun removeAttachment(id: String) { _pendingAttachments.value = _pendingAttachments.value.filter { it.id != id } }
+    fun saveCode(language: String, code: String) { viewModelScope.launch {
+        try { withContext(Dispatchers.IO) {
+            val extension = when (language.lowercase()) { "python", "py" -> "py"; "bash", "shell", "sh" -> "sh"; "html" -> "html"; "json" -> "json"; "markdown", "md" -> "md"; else -> "txt" }
+            com.musabgpt.m4.artifacts.ArtifactRepository.saveText(getApplication(), _currentId.value, "code-${System.currentTimeMillis()}.$extension", code)
+        } } catch (e: Exception) { edit(_currentId.value) { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "تعذر حفظ الملف: ${e.message}")) }; saveHistory() }
+    } }
     fun setPlanMode(plan: Boolean) {
         _permissionMode.value = if (plan) "plan_only" else "auto_project"
         prefs.edit().putString("permission_mode", _permissionMode.value).apply()
@@ -87,7 +107,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     title = c.optString("title", "محادثة جديدة"),
                     messages = (0 until items.length()).map { n ->
                         val m = items.getJSONObject(n)
-                        UiMessage(id = m.getString("id"), role = m.getString("role"), content = m.getString("content"))
+                        UiMessage(id = m.getString("id"), role = m.getString("role"), content = m.getString("content"), turnId = m.optString("turn_id"), attachments = m.optJSONArray("attachments")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
                     }
                 )
             }.ifEmpty { listOf(Conversation()) }
@@ -99,7 +119,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _conversations.value.take(30).forEach { c ->
             val messages = JSONArray()
             c.messages.takeLast(100).forEach { m ->
-                messages.put(JSONObject().put("id", m.id).put("role", m.role).put("content", m.content.take(40000)))
+                messages.put(JSONObject().put("id", m.id).put("role", m.role).put("content", m.content.take(40000)).put("turn_id", m.turnId).put("attachments", JSONArray(m.attachments)))
             }
             array.put(JSONObject().put("id", c.id).put("title", c.title).put("messages", messages))
         }
@@ -117,13 +137,54 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val c = Conversation()
         _conversations.value = listOf(c) + _conversations.value
         _currentId.value = c.id
+        _pendingAttachments.value = emptyList()
         saveHistory()
     }
     fun select(id: String) {
         if (_streaming.value) return
         if (_conversations.value.any { it.id == id }) {
             _currentId.value = id
+            _pendingAttachments.value = emptyList()
             prefs.edit().putString("active_conversation", id).apply()
+        }
+    }
+    fun rename(id: String, title: String) { if (!_streaming.value && title.isNotBlank()) { edit(id) { it.copy(title = title.trim().take(100)) }; saveHistory() } }
+    fun delete(id: String) {
+        if (_streaming.value) return
+        com.musabgpt.m4.runtime.CapabilityBroker.revoke(id)
+        _conversations.value = _conversations.value.filter { it.id != id }.ifEmpty { listOf(Conversation()) }
+        if (_currentId.value == id) _currentId.value = _conversations.value.first().id
+        saveHistory()
+    }
+    fun fork(messageId: String? = null, editText: String? = null) {
+        if (_streaming.value) return
+        val source = _conversations.value.first { it.id == _currentId.value }
+        val at = messageId?.let { id -> source.messages.indexOfFirst { it.id == id } } ?: source.messages.lastIndex
+        val id = UUID.randomUUID().toString()
+        viewModelScope.launch {
+            val mapping = withContext(Dispatchers.IO) { com.musabgpt.m4.artifacts.ArtifactRepository.fork(getApplication(), source.id, id) }
+            val messages = source.messages.take(if (editText == null) at + 1 else at).map { it.copy(id = UUID.randomUUID().toString(), attachments = it.attachments.mapNotNull { old -> mapping[old] }) }
+            _conversations.value = listOf(Conversation(id, source.title + " • فرع", messages)) + _conversations.value
+            _currentId.value = id; saveHistory()
+            if (editText != null) send(editText)
+        }
+    }
+    fun exportChat() { viewModelScope.launch {
+        val c = _conversations.value.first { it.id == _currentId.value }
+        withContext(Dispatchers.IO) { com.musabgpt.m4.artifacts.ArtifactRepository.saveReport(getApplication(), c.id, "conversation.md", "# ${c.title}\n\n" + c.messages.joinToString("\n\n") { "## ${it.role}\n${it.content}" }) }
+    } }
+    fun rewind(turnId: String) { if (_streaming.value || turnId.isBlank()) return
+        val owner = _currentId.value
+        _streaming.value = true
+        job = viewModelScope.launch {
+            try {
+                val request = JSONObject().put("owner_session_id", owner).put("turn_id", UUID.randomUUID().toString()).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "/rewind $turnId")))
+                val result = terminal.chat(request, selected.id, _permissionMode.value) {}
+                val value = runCatching { JSONObject(result.getString("content")) }.getOrNull()
+                if (value?.optString("status") == "rewound") edit(owner) { c -> c.copy(messages = c.messages.takeWhile { it.turnId != turnId }) }
+                else edit(owner) { c -> c.copy(messages = c.messages + UiMessage(role = "assistant", content = result.optString("content", "تعذر التراجع"))) }
+            } catch (e: Exception) { edit(owner) { c -> c.copy(messages = c.messages + UiMessage(role = "assistant", content = "تعذر التراجع: ${e.message}")) } }
+            finally { _streaming.value = false; saveHistory() }
         }
     }
     fun stop() {
@@ -144,28 +205,38 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String) {
         val clean = text.trim()
         if (clean.isEmpty() || _streaming.value) return
+        if (clean in setOf("/terminal", "/phone", "/browser", "/github", "/tasks", "/termux", "/schedule")) { _requestedPanel.value = when(clean) { "/schedule" -> "tasks"; "/termux" -> "tools"; "/phone" -> "tools"; else -> clean.drop(1) }; return }
+        if (clean == "/export") { exportChat(); return }
+        if (clean == "/compact") {
+            edit(_currentId.value) { c -> if (c.messages.size <= 20) c else c.copy(messages = listOf(c.messages.first(), UiMessage(role = "assistant", content = "سياق مضغوط: الهدف الأصلي أعلاه؛ حُذفت ${c.messages.size - 17} رسالة من سياق النموذج. المرفقات وسجل الأدوات باقية.\n" + c.messages.filter { it.role == "user" }.takeLast(4).joinToString("\n") { it.content.take(500) })) + c.messages.takeLast(16)) }
+            saveHistory(); return
+        }
+        if (clean.startsWith("/permissions ")) { setPermissionMode(clean.substringAfter(' ').trim()); return }
         if (clean in setOf("/help", "/plan", "/permissions", "/clear")) {
             if (clean == "/clear") { newChat(); return }
             if (clean == "/plan") setPlanMode(_permissionMode.value != "plan_only")
             val result = when (clean) {
                 "/help" -> "اكتب طلبك مباشرة؛ المحادثة تستخدم أدوات الهاتف والملفات والطرفية. ! ينفذ أمرًا صريحًا. /plan للتخطيط، /permissions للصلاحيات، /tools للأدوات، /doctor للقدرات، /clear لمحادثة جديدة."
-                else -> if (_permissionMode.value == "plan_only") "وضع الوكيل: تخطيط للقراءة فقط" else "وضع الوكيل: تنفيذ داخل المشروع بعد موافقة التشغيل"
+                "/permissions" -> "الوضع الحالي: ${_permissionMode.value}\nاختر من قائمة الصلاحيات: auto_project، ask_always، accept_edits، plan_only. كل إجراء حساس للهاتف أو النشر يطلب موافقة محددة."
+                else -> if (_permissionMode.value == "plan_only") "وضع الوكيل: تخطيط للقراءة فقط" else "وضع الوكيل: تنفيذ داخل المشروع"
             }
             edit(_currentId.value) { c -> c.copy(messages = c.messages + UiMessage(role = "user", content = clean) + UiMessage(role = "assistant", content = result)) }
             saveHistory()
             return
         }
         val convId = _currentId.value
-        val reply = UiMessage(role = "assistant", content = "")
+        val turnId = UUID.randomUUID().toString()
+        val attached = _pendingAttachments.value
+        _pendingAttachments.value = emptyList()
+        val reply = UiMessage(role = "assistant", content = "", turnId = turnId)
         edit(convId) { c ->
             c.copy(title = if (c.messages.isEmpty()) clean.take(35) else c.title,
-                   messages = c.messages + UiMessage(role = "user", content = clean) + reply)
+                   messages = c.messages + UiMessage(role = "user", content = clean, turnId = turnId, attachments = attached.map { it.id }) + reply)
         }
         saveHistory()
         val conv = _conversations.value.first { it.id == convId }
         val history = JSONArray().apply { conv.messages.dropLast(1).takeLast(32).forEach { put(JSONObject().put("role", it.role).put("content", it.content)) } }
         val primary = selected
-        val turnId = UUID.randomUUID().toString()
         currentTurn = turnId
         _activeRoute.value = ""
         _streaming.value = true
@@ -182,6 +253,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     JSONObject().put("content", observed.optString("message", observed.optString("error", "تعذر فتح التطبيق")))
                 } else {
                     val request = JSONObject().put("owner_session_id", convId).put("turn_id", turnId).put("messages", history)
+                        .put("attachments", JSONArray(attached.map { it.json().put("path", ".m4/imports/${it.id}/${it.name}") }))
                     terminal.chat(request, primary.id, _permissionMode.value) { event ->
                         if (event.kind == "provider_route") {
                             _activeRoute.value = "المسار الفعلي: " + event.result
@@ -208,6 +280,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 _streaming.value = false
                 currentTurn = null
                 saveHistory()
+                com.musabgpt.m4.scheduler.TaskScheduler.event(getApplication(), "chat_finished", turnId, convId)
             }
         }
     }

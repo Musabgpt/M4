@@ -20,6 +20,9 @@ MAX_SIZE = 25_000_000
 
 
 class ArtifactStore:
+    def list_published(self):
+        return [self.inspect(p.parent.name) for p in self.folder.glob("*/manifest.json")
+                if json.loads(p.read_text()).get("published") and json.loads(p.read_text()).get("owner_session_id") == os.environ.get("M4_OWNER_SESSION", "terminal")]
     def __init__(self, root, state, safe_path, bridge=None):
         self.root, self.state, self.safe_path, self.bridge = root, state, safe_path, bridge
         self.folder = state / "artifacts"

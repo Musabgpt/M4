@@ -6,7 +6,8 @@ import socket
 
 
 class AndroidBridge:
-    def __init__(self, config_path=None):
+    def __init__(self, config_path=None, permission_mode="auto_project"):
+        self.permission_mode = permission_mode
         self.config_path = Path(config_path or os.environ.get(
             "M4_BRIDGE_CONFIG", "/root/.m4/run/bridge.json"))
 
@@ -14,6 +15,7 @@ class AndroidBridge:
         config = json.loads(self.config_path.read_text(encoding="utf-8"))
         # Session identity is supplied by the host, never accepted from model args.
         request = json.dumps({"token": config["token"], "action": action,
+                              "permission_mode": self.permission_mode,
                               "owner_session_id": os.environ.get("M4_OWNER_SESSION", "terminal"),
                               "turn_id": os.environ.get("M4_TURN_ID", "terminal"),
                               "arguments": arguments or {}}, ensure_ascii=False).encode() + b"\n"

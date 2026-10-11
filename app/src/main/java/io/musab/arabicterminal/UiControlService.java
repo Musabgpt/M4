@@ -36,6 +36,7 @@ public final class UiControlService extends AccessibilityService {
     private LinearLayout overlay;
     private WindowManager.LayoutParams params;
     private boolean expanded;
+    private String approvalId;
 
     public static UiControlService current(){return instance;}
     @Override public void onServiceConnected(){
@@ -83,6 +84,19 @@ public final class UiControlService extends AccessibilityService {
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL;
         wm.updateViewLayout(overlay,params);
     }
+    public void showApproval(String id,String action,String details){
+        installOverlay();
+        if(overlay==null)return;
+        approvalId=id;overlay.removeAllViews();
+        TextView label=new TextView(this);label.setTextColor(0xFFFFFFFF);label.setTextSize(13);
+        label.setText(action+"\n"+details.substring(0,Math.min(details.length(),1000)));
+        label.setMaxWidth((int)(300*getResources().getDisplayMetrics().density));
+        overlay.addView(label);
+        overlay.addView(button("السماح مرة",()->com.musabgpt.m4.runtime.CapabilityBroker.resolve(id,true,false)));
+        overlay.addView(button("رفض",()->com.musabgpt.m4.runtime.CapabilityBroker.resolve(id,false,false)));
+        overlay.addView(button("⏹ إيقاف",com.musabgpt.m4.runtime.AgentControl::stop));
+    }
+    public void hideApproval(String id){if(id.equals(approvalId)){approvalId=null;collapse();}}
     private void expand(){
         if(overlay==null)return;
         expanded=true;

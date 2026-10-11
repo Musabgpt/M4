@@ -15,6 +15,11 @@ from .bridge import AndroidBridge
 from .registry import Registry, schema, tool
 from .memory import MemoryStore
 from .extensions import Extensions
+from .mcp import MCPManager
+from .network import WebClient
+from .git_tools import GitTools
+from .checkpoints import Checkpoints
+from .hooks import Hooks
 
 S = schema("string")
 MODES = ("ask_always", "accept_edits", "plan_only", "auto_project")
@@ -29,103 +34,7 @@ def child_environment():
         k.upper() in {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "GH_TOKEN", "GITHUB_TOKEN"})}
 
 
-class ShellPool:
-    """Processes belong to this live runtime, never recovered using stale PIDs."""
-    def __init__(self, root, commands):
-        self.root, self.commands, self.jobs = root, commands, {}
-
-    def start(self, args):
-        argv = shlex.split(args["command"])
-        if not argv or "/" in argv[0] or argv[0] not in self.commands:
-            raise ValueError("Executable not allowed")
-        identifier = uuid.uuid4().hex
-        started = time.time()
-        process = subprocess.Popen(argv, cwd=self.root, env=child_environment(),
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   stdin=subprocess.DEVNULL, start_new_session=True)
-        row = {"process": process, "stdout": "", "stderr": "", "cursor": {"stdout": 0, "stderr": 0},
-               "status": "running", "started_at": started, "ended_at": None, "truncated": False,
-               "exit_code": None, "mutex": threading.Lock(), "done": threading.Event()}
-        self.jobs[identifier] = row
-        timeout = args.get("timeout", 90)
-
-        def read(stream, field):
-            import codecs
-            decoder = codecs.getincrementaldecoder("utf-8")("replace")
-            while True:
-                data = os.read(stream.fileno(), 4096)
-                value = decoder.decode(data, final=not data)
-                with row["mutex"]:
-                    remaining = max(0, 64000 - len(row[field]))
-                    row[field] += value[:remaining]
-                    if len(value) > remaining:
-                        row["truncated"] = True
-                if not data:
-                    break
-            stream.close()
-
-        readers = [threading.Thread(target=read, args=(getattr(process, field), field), daemon=True)
-                   for field in ("stdout", "stderr")]
-        for reader in readers:
-            reader.start()
-
-        def wait():
-            try:
-                process.wait(timeout=timeout)
-                if row["status"] == "running":
-                    row["status"] = "succeeded" if process.returncode == 0 else "failed"
-            except subprocess.TimeoutExpired:
-                row["status"] = "timed_out"
-                self._terminate(process)
-                process.wait()
-            # A child can retain inherited pipes. Bound output collection as well.
-            for reader in readers:
-                reader.join(timeout=1)
-            row["exit_code"] = process.returncode
-            row["ended_at"] = time.time()
-            row["done"].set()
-
-        threading.Thread(target=wait, daemon=True).start()
-        if not args.get("background", False):
-            row["done"].wait(timeout + 4)
-        return self.output(identifier)
-
-    @staticmethod
-    def _terminate(process):
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-            process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-
-    def output(self, identifier):
-        if identifier not in self.jobs:
-            raise ValueError("Unknown or expired shell session")
-        row = self.jobs[identifier]
-        with row["mutex"]:
-            result = {k: row[k] for k in ("status", "started_at", "ended_at", "exit_code", "truncated")}
-            for field in ("stdout", "stderr"):
-                result[field] = row[field][row["cursor"][field]:]
-                row["cursor"][field] = len(row[field])
-            result.update(shell_id=identifier, command_id=identifier, backend="alpine" if Path("/etc/alpine-release").exists() else "host")
-            return result
-
-    def kill(self, identifier):
-        if identifier not in self.jobs:
-            raise ValueError("Unknown shell session")
-        row = self.jobs[identifier]
-        if not row["done"].is_set():
-            row["status"] = "canceled"
-            self._terminate(row["process"])
-            row["done"].wait(4)
-        return self.output(identifier)
-
-    def close(self):
-        for identifier, row in list(self.jobs.items()):
-            if not row["done"].is_set():
-                self.kill(identifier)
+from .shell_pool import ShellPool
 
 
 class ToolRuntime:
@@ -138,13 +47,18 @@ class ToolRuntime:
         self.reads = {}
         self.active_call = None
         self.call_approved = False
-        self.bridge = AndroidBridge()
+        self.bridge = AndroidBridge(permission_mode=self.mode)
         self.capabilities = self.bridge.capabilities()
         self.artifacts = ArtifactStore(root, state, self._path, self.bridge if self.capabilities.get("artifact_pdf") else None)
-        self.shells = ShellPool(root, commands)
+        self.shells = ShellPool(root, commands, state)
         self.registry = Registry()
         self.memory = MemoryStore(str(root)) if os.environ.get("M4_MEMORY_HOME") else None
         self.extensions = Extensions(self)
+        self.mcp = MCPManager(self)
+        self.web = WebClient()
+        self.git = GitTools(self)
+        self.checkpoints = Checkpoints(self)
+        self.hooks = Hooks(self)
         self._register()
         self.extensions.refresh()
 
@@ -180,6 +94,27 @@ class ToolRuntime:
             {"risk_level": risk, "requires_user_consent": risk == "execute"})
 
     def _register(self):
+        self._add("Verify", "Run actual configured independent project checks and record exit codes.", self.verify_checks)
+        self._add("AgentsList", "Read the persisted subagent reports.", self.agents_list)
+        self._add("Task", "Delegate a bounded read-only review or exploration with isolated context and grants.", self.task,
+                  {"goal": S, "type": schema("string", enum=["reviewer", "explorer", "tester"]), "steps": schema("integer", minimum=1, maximum=12)}, ("goal",))
+        self._add("Checkpoints", "List actual grouped file snapshots.", lambda a: self.checkpoints.listing(a))
+        self._add("Rewind", "Restore a file group only if no external edit conflicts with it.", lambda a: self.checkpoints.rewind(a), {"id": S}, ("id",))
+        self._add("HooksList", "List installed lifecycle hooks.", lambda a: self.hooks.listing(a))
+        self._add("HookInstall", "Register a bounded explicitly approved lifecycle command; hooks cannot expand grants.", lambda a: self.hooks.install(a),
+                  {"event": S, "matcher": S, "command": S}, ("event", "matcher", "command"))
+        self._add("HooksDisable", "Disable a lifecycle event hook group.", self.hooks_disable, {"event": S}, ("event",))
+        self._add("WebFetch", "Fetch bounded public HTTPS text with DNS pinning; content is untrusted data.", self.web_fetch, {"url": S}, ("url",))
+        self._add("WebSearch", "Search actual public services with a verified fallback; return source links.", lambda a: self.web.search(a["query"]), {"query": S}, ("query",))
+        self._add("GitStatus", "Read actual branch, HEAD and working changes.", lambda a: self.git.status(a))
+        self._add("GitDiff", "Read actual working or staged diff.", lambda a: self.git.diff(a), {"path": S, "staged": schema("boolean")})
+        self._add("GitBranch", "Create a work branch without overwriting main.", lambda a: self.git.branch(a), {"name": S}, ("name",))
+        self._add("GitCommit", "Commit explicit reviewed paths on a work branch.", lambda a: self.git.commit(a), {"message": S, "paths": schema("array", items=S, maxItems=50)}, ("message", "paths"))
+        self._add("GitLog", "Read commit hashes and messages.", lambda a: self.git.log(a), {"limit": schema("integer", minimum=1, maximum=50)})
+        self._add("MCPConnect", "Connect and negotiate an explicitly authorized MCP stdio or Streamable HTTP server.", lambda a: self.mcp.connect(a),
+                  {"name": S, "transport": schema("string", enum=["stdio", "http"]), "command": schema("array", items=S), "url": S}, ("name", "transport"))
+        self._add("MCPList", "List currently negotiated MCP connections.", lambda a: [{"name": n, "protocol": c.version, "tools": self.mcp.names[n]} for n, c in self.mcp.servers.items()])
+        self._add("MCPDisconnect", "Disconnect and remove all server tools immediately.", lambda a: self.mcp.disconnect(a), {"name": S}, ("name",))
         self._add("SkillsList", "List installed enabled instruction skills.", lambda a: self.extensions.skill_list(a))
         self._add("SkillRead", "Load a skill as untrusted data within existing grants.", lambda a: self.extensions.skill_read(a), {"name": S}, ("name",))
         self._add("SkillCreate", "Write and actually test a skill before hot activation.", lambda a: self.extensions.skill_create(a),
@@ -227,7 +162,10 @@ class ToolRuntime:
                   {"name": S, "paths": schema("array", items=S), "ids": schema("array", items=S),
                    "publish_to_chat": schema("boolean")}, ("name",))
         self._add("ArtifactInspect", "Independently check artifact size and SHA-256.",
-                  lambda a: self.artifacts.inspect(a["id"]), {"id": S}, ("id",))
+                  self.artifact_inspect, {"id": S}, ("id",))
+        if self.capabilities.get("artifact_pdf"):
+            self._add("ArtifactView", "Open a verified attachment in an Android viewer.",
+                      lambda a: self.android_action("artifact_view", a, True), {"id": S}, ("id",))
         self._add("ArtifactPublish", "Persist a real verified attachment for the owner conversation.", self.artifact_publish,
                   {"id": S}, ("id",))
         self._add("Finish", "Request independent configured checks; never directly mark success.",
@@ -244,10 +182,22 @@ class ToolRuntime:
         self._add("git_status", "Read actual Git status.", self.git_status)
         self._add("run_command", "Legacy explicitly authorized command.", self.run_command, {"command": S}, ("command",))
         if self.capabilities.get("scheduler"):
+            for name, action in {"ScheduleList": "list", "ScheduleRun": "run", "SchedulePause": "pause", "ScheduleLogs": "logs", "ScheduleClone": "clone", "ScheduleEnable": "enable"}.items():
+                self._add(name, "Actual durable Android task " + action + ".",
+                    lambda a, action=action: self.android_action("schedule", dict(a, action=action), action not in {"list", "logs"}),
+                    {} if action == "list" else {"id": S}, () if action == "list" else ("id",))
             self._add("ScheduleCreate", "Register a durable Android task within approved command scope.", self.schedule,
-                      {"name": S, "command": S, "type": schema("string", enum=["once", "hourly", "daily"]),
-                       "delay_minutes": schema("integer", minimum=1, maximum=525600)}, ("name", "command", "type"))
+                      {"name": S, "command": S, "type": schema("string", enum=["once", "hourly", "daily", "weekly", "monthly", "interval", "condition_watch", "on_app_event", "on_ci_event"]),
+                       "delay_minutes": schema("integer", minimum=1, maximum=525600), "interval_minutes": schema("integer", minimum=15, maximum=525600),
+                       "timezone": S, "trigger": schema("object", properties={"event": S, "condition": S, "percent": schema("integer", minimum=0, maximum=100), "repository": S, "conclusion": S, "month_day": schema("integer", minimum=1, maximum=31)}, additionalProperties=False)}, ("name", "command", "type"))
         if self.capabilities.get("phone"):
+            self._add("TermuxRun", "Run an explicitly approved optional Termux executable and await the real official result.",
+                lambda a: self.android_action("termux_run", a, True), {"executable": S, "arguments": schema("array", items=S, maxItems=50), "cwd": S, "timeout": schema("integer", minimum=1, maximum=120)}, ("executable",))
+            self._add("TermuxOutput", "Read a durable Termux stdout/stderr and exit code receipt belonging to this conversation.",
+                lambda a: self.bridge.request("termux_output", a), {"id": S}, ("id",))
+            self._add("PhoneTestLab", "Run actual Android launch, interactions, required UI assertions, screenshot and Markdown receipt.",
+                lambda a: self.android_action("phone_test", a, True), {"name": S, "app": S,
+                "steps": schema("array", maxItems=30, items=schema("object", properties={"action": schema("string", enum=["screen", "wait_for", "assert_visible", "tap", "type", "swipe", "scroll", "long_press", "back", "home"]), "text": S, "node": S, "x": schema("integer"), "y": schema("integer"), "direction": S, "timeout": schema("integer", minimum=0, maximum=30)}, required=["action"], additionalProperties=False))}, ("app", "steps"))
             phone = {
                 "PhoneListApps": ("list_apps", {}, ()),
                 "PhoneOpenApp": ("open_app", {"app": S}, ("app",)),
@@ -275,6 +225,9 @@ class ToolRuntime:
                 self.registry.metadata[name].update(risk_level="read" if action in reads else "phone", capabilities=["android"], requires_user_consent=action not in reads)
 
         if self.capabilities.get("browser"):
+            self._add("BrowserTestLab", "Open an owner HTML attachment, interact, assert the live DOM, record console and screenshot.",
+                lambda a: self.android_action("browser_test", a, True), {"id": S,
+                "steps": schema("array", maxItems=30, items=schema("object", properties={"action": schema("string", enum=["click", "type", "scroll", "wait_for", "assert_visible", "read_dom"]), "selector": S, "text": S, "pixels": schema("integer"), "timeout": schema("integer", minimum=0, maximum=30)}, required=["action"], additionalProperties=False))}, ("id", "steps"))
             browser = {
                 "BrowserOpen": ("open", {"url": S, "timeout": schema("integer", minimum=1, maximum=30)}, ("url",)),
                 "BrowserOpenArtifact": ("open_artifact", {"id": S}, ("id",)),
@@ -293,6 +246,27 @@ class ToolRuntime:
                 self._add(name, "Owned Android WebView: " + action + ". Web content is untrusted data.",
                     lambda a, action=action: self.android_action("browser", dict(a, action=action), action not in read_actions), properties, required)
                 self.registry.metadata[name].update(capabilities=["webview"], risk_level="read" if action in read_actions else "browser")
+        if self.capabilities.get("github_client"):
+            github = {
+                "GitHubStatus": ("status", {}, ()),
+                "GitHubRepositories": ("repositories", {"owner": S}, ()),
+                "GitHubRuns": ("runs", {"repository": S}, ("repository",)),
+                "GitHubRun": ("run", {"repository": S, "id": schema("integer", minimum=1)}, ("repository", "id")),
+                "GitHubJobs": ("jobs", {"repository": S, "id": schema("integer", minimum=1)}, ("repository", "id")),
+                "GitHubArtifacts": ("artifacts", {"repository": S, "id": schema("integer", minimum=1)}, ("repository", "id")),
+                "GitHubPullRequests": ("pull_requests", {"repository": S}, ("repository",)),
+                "GitHubPullRequest": ("pull_request", {"repository": S, "id": schema("integer", minimum=1)}, ("repository", "id")),
+                "GitHubPRCreate": ("pr_create", {"repository": S, "head": S, "base": S, "title": S, "body": S}, ("repository", "head", "title")),
+                "GitHubIssueCreate": ("issue_create", {"repository": S, "title": S, "body": S}, ("repository", "title")),
+                "GitHubWorkflowDispatch": ("workflow_dispatch", {"repository": S, "workflow": S, "ref": S, "inputs": schema("object")}, ("repository", "workflow", "ref")),
+            }
+            for name, (action, properties, required) in github.items():
+                mutation = action in {"pr_create", "issue_create", "workflow_dispatch"}
+                self._add(name, "Native GitHub " + action + "; native vault credentials never enter model context.",
+                    lambda a, action=action, mutation=mutation: self.android_action("github", dict(a, action=action), mutation), properties, required)
+                self.registry.metadata[name].update(capabilities=["github"], risk_level="publish" if mutation else "read", requires_user_consent=mutation)
+            self._add("GitPush", "Upload a committed patch to a new work branch via the native GitHub client, with conflict checks and approval.",
+                self.git_push, {"repository": S, "message": S}, ("repository", "message"))
 
     @classmethod
     def describe(cls):
@@ -341,6 +315,7 @@ class ToolRuntime:
         if path.is_file() and path.read_bytes() == data:
             return "Unchanged " + relative
         self.backup(self.state, path, relative)
+        self.checkpoints.before(path, relative)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(".m4-write-" + uuid.uuid4().hex)
         try:
@@ -351,6 +326,7 @@ class ToolRuntime:
         finally:
             temporary.unlink(missing_ok=True)
         self.reads[str(path)] = hashlib.sha256(data).hexdigest()
+        self.checkpoints.after(path, relative)
         return "Wrote " + relative
 
     def write(self, args):
@@ -454,6 +430,13 @@ class ToolRuntime:
         self._permission(mutation=True)
         return self.artifacts.publish(args["id"])
 
+    def artifact_inspect(self, args):
+        try:
+            return self.artifacts.inspect(args["id"])
+        except ValueError:
+            if not self.capabilities.get("artifact_pdf"): raise
+            return self.bridge.request("artifact_inspect", args)
+
     def schedule(self, args):
         self._permission(execution=True)
         return self.bridge.request("schedule_create", dict(args, owner_session_id=os.environ.get("M4_OWNER_SESSION", "terminal")))
@@ -468,6 +451,67 @@ class ToolRuntime:
         if self.memory is None:
             self.memory = MemoryStore(str(self.root))
         return {"untrusted_memory": self.memory.recall(args["query"], 12), "failures": self.memory.recent_failures(4)}
+
+    def web_fetch(self, args):
+        from urllib.parse import urlsplit
+        url = urlsplit(args["url"])
+        if url.hostname in {"127.0.0.1", "localhost", "::1"}:
+            if not self.capabilities.get("permission_broker") or not self.bridge.request("approve", {"tool": "Loopback WebFetch", "arguments": args}).get("approved"):
+                raise ValueError("Loopback read needs explicit host consent")
+            self.web.local_origins.add((url.scheme, url.hostname, url.port or (443 if url.scheme == "https" else 80)))
+        return self.web.fetch(args["url"])
+
+    def git_push(self, args):
+        self._permission(execution=True)
+        state = self.git.status({})
+        if state["changes"].strip(): raise ValueError("Commit changes before publishing")
+        if state["branch"] in {"main", "master", ""}: raise ValueError("Publish requires a work branch")
+        baseline = self.git.git("rev-list", "--max-parents=0", "HEAD").splitlines()[0]
+        changed = self.git.git("diff", "--name-status", baseline, "HEAD").splitlines()
+        files = []
+        for row in changed:
+            fields = row.split("\t")
+            if len(fields) != 2 or fields[0] not in {"A", "M", "D"}: raise ValueError("Unsupported rename; publish explicit reviewed files")
+            change, path = fields
+            self._path(self.root, path, write=True)
+            before = "" if change == "A" else self.git.git("rev-parse", baseline + ":" + path).strip()
+            item = {"path": path, "base_sha": before, "deleted": change == "D", "mode": "100644"}
+            if change != "D":
+                source = self._path(self.root, path)
+                if source.stat().st_size > 500000: raise ValueError("Publish file exceeds 500KB")
+                data = source.read_bytes()
+                blob = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+                if blob != self.git.git("rev-parse", "HEAD:" + path).strip(): raise ValueError("File changed after the commit")
+                item["content"] = data.decode("utf-8")
+                item["mode"] = self.git.git("ls-tree", "HEAD", "--", path).split()[0]
+            files.append(item)
+        if not files: raise ValueError("No committed changes since the local baseline")
+        return self.bridge.request("github", dict(args, action="snapshot_push", branch=state["branch"], files=files))
+
+    def hooks_disable(self, args):
+        self._permission(mutation=True)
+        hooks = self.hooks.listing({}); hooks.pop(args["event"], None)
+        self.hooks.path.write_text(json.dumps(hooks))
+        return {"status": "disabled", "event": args["event"]}
+
+    def verify_checks(self, args):
+        self._permission(execution=True)
+        path = self.state / "checks.json"
+        checks = json.loads(path.read_text()) if path.is_file() else []
+        if not isinstance(checks, list) or not checks: raise ValueError("No independent checks configured for this project")
+        results = []
+        for command in checks[:8]:
+            row = self.shells.start({"command": command, "timeout": 120})
+            results.append(dict(row, command=command))
+        return {"status": "verified" if all(x["exit_code"] == 0 for x in results) else "failed", "checks": results}
+
+    def agents_list(self, args):
+        return [json.loads(p.read_text()) for p in sorted((self.state / "subagents").glob("*/report.json"))[-20:] if p.stat().st_size <= 100000]
+
+    def task(self, args):
+        runner = getattr(self, "task_runner", None)
+        if runner is None: raise ValueError("Subagent requires an active chat runtime")
+        return runner(args)
 
     def memory_write(self, args):
         self._permission(mutation=True)
@@ -488,13 +532,18 @@ class ToolRuntime:
         self.registry.validate(name, args)
         self.active_call, self.call_approved = (name, args), False
         try:
+            if name not in {"HookInstall", "HooksDisable"}:
+                self.hooks.run("PreToolUse", name, args)
             result = self.registry.call(name, args)
+            if name not in {"HookInstall", "HooksDisable"}:
+                self.hooks.run("PostToolUse", name, args, result)
             return result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
         finally:
             self.active_call, self.call_approved = None, False
 
     def close(self):
         self.shells.close()
+        self.mcp.close()
         if self.memory is not None:
             self.memory.close()
             self.memory = None

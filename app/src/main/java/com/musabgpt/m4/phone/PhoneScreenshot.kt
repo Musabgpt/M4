@@ -26,7 +26,7 @@ object PhoneScreenshot {
                     val output = java.io.ByteArrayOutputStream()
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
                     bitmap.recycle(); hardware.recycle()
-                    result.complete(ArtifactRepository.saveBinary(context, owner, name.removeSuffix(".png") + ".png", "image/png", output.toByteArray()).json().put("status", "verified"))
+                    result.complete(ArtifactRepository.saveBinary(context, owner, name.removeSuffix(".png") + ".png", "image/png", output.toByteArray()).json().put("status", "verified").put("published", true))
                 } catch (e: Exception) { result.complete(JSONObject().put("status", "failed").put("error", e.message)) }
                 finally { buffer.close() }
             }

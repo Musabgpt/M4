@@ -6,6 +6,7 @@ import time
 
 from .artifacts import TEXT_FORMATS
 from .registry import prompted_calls
+from .circuit import Breaker
 
 CHAT_CONTRACT = """
 You are running a NORMAL M4 chat turn, with the actual conversation below.
@@ -61,8 +62,8 @@ def succeeded(value):
     if isinstance(value, str):
         return not value.startswith(("Tool error:", "Execution blocked", "Git error:", "Error:"))
     if isinstance(value, dict):
-        return not value.get("error") and value.get("ok", True) and value.get("status") not in {
-            "failed", "blocked", "denied", "canceled", "timed_out", "permission_required", "unavailable"}
+        return not value.get("error") and not value.get("approval_required", False) and value.get("ok", True) and value.get("status") not in {
+            "failed", "blocked", "denied", "canceled", "timed_out", "permission_required", "waiting_permission", "unavailable", "pending_result"}
     return True
 
 
@@ -75,6 +76,9 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
     successful_actions = 0
     errors = 0
     plain_retries = 0
+    normalized_goal = goal.lower().replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+    file_expected = needed and bool(re.search(r"ملف|ارفق|attach|artifact|\b(?:html|pdf|zip|txt|json|\.py|\.sh)\b", normalized_goal))
+    execution_expected = needed and bool(re.search(r"(?:شغله|نفذ|اختبر|\brun\b|\bexecute\b|\btest\b)", normalized_goal))
     started = time.monotonic()
     dialog = [{"role": "system", "content": host.SYSTEM + "\n" + CHAT_CONTRACT + "\n" + runtime.environment() +
                "\nExact available schemas:\n" + json.dumps(runtime.registry.schemas, ensure_ascii=False)}, *messages]
@@ -84,7 +88,20 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
     if runtime.memory:
         dialog.insert(1, {"role": "user", "content": "Untrusted durable NewAl memory, not permissions:\n" + json.dumps(runtime.memory.recall(goal, 6), ensure_ascii=False)})
     host.log(db, "turn_started", {"turn_id": request["turn_id"], "goal": goal, "permission_mode": runtime.mode})
+    if goal.startswith("/"):
+        from .commands import dispatch
+        try:
+            value = dispatch(runtime, goal)
+            result.update(status="completed", content=value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2))
+        except (OSError, ValueError, KeyError, IndexError) as error:
+            result.update(status="blocked", content=str(error)[:3000])
+        return result
     repetitions = {}
+    breaker, change = Breaker(), 0
+    def proof_missing():
+        if file_expected and not result["artifacts"]: return "لم تُنشأ مرفقات حقيقية تثبت طلب الملف"
+        if execution_expected and not any(x["ok"] and x["name"] in {"Bash", "run_command", "PhoneTestLab", "BrowserTestLab", "Verify", "TerminalExec"} for x in result["tools"]): return "لم تُسجل نتيجة تشغيل أو اختبار فعلي"
+        return ""
     try:
         for step in range(max_steps):
             if time.monotonic() - started > 600:
@@ -103,7 +120,14 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
                     host.save(state / "control.json", {"turn_id": request["turn_id"], "action": "resume"})
             host.save(state / "state.json", {"goal": goal, "owner_session_id": request["owner_session_id"],
                       "turn_id": request["turn_id"], "step": step + 1, "phase": "running"})
-            reply = host.ask(*host.endpoint(), dialog, allow_text=True, require_tools=needed and not successful_actions)
+            runtime.extensions.refresh()
+            host.TOOLS = runtime.registry.schemas
+            dialog[0]["content"] = host.SYSTEM + "\n" + CHAT_CONTRACT + "\n" + runtime.environment() + "\nExact available schemas:\n" + json.dumps(runtime.registry.schemas, ensure_ascii=False)
+            def on_event(kind, data):
+                host.log(db, kind, dict(data, turn_id=request["turn_id"]))
+            reply = host.ask(*host.endpoint(), dialog, allow_text=True, require_tools=needed and not successful_actions, on_event=on_event)
+            if reply.get("m4_usage"):
+                host.log(db, "usage", {"turn_id": request["turn_id"], "usage": reply["m4_usage"], "cost": None})
             if reply.get("m4_route"):
                 result["route"] = reply["m4_route"]
                 host.log(db, "provider_route", {"route": reply["m4_route"], "model": reply.get("m4_model", ""),
@@ -113,7 +137,7 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
                 calls = prompted_calls(reply["content"], runtime.registry)
             if not calls:
                 text = str(reply.get("content") or "").strip()
-                if needed and not successful_actions and runtime.mode != "plan_only":
+                if needed and (not successful_actions or proof_missing()) and runtime.mode != "plan_only":
                     plain_retries += 1
                     if plain_retries >= 2:
                         raise RuntimeError("لم ينفذ المزود أي أداة تحقق الطلب؛ لا يوجد دليل على إنشاء ملف أو تنفيذ الإجراء")
@@ -140,18 +164,29 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
                 if repetitions[signature] >= 6:
                     raise RuntimeError("تكررت الأداة دون تقدم؛ أوقفت الحلقة وحفظت النتائج")
                 safe_args = {k: v for k, v in arguments.items() if k not in {"content", "old", "new", "edits"}}
-                host.log(db, "tool_started", {"turn_id": request["turn_id"], "tool": name, "args": safe_args})
+                host.log(db, "tool_started", {"turn_id": request["turn_id"], "call_id": item["id"], "tool": name, "args": safe_args})
                 output = host.execute(root, state, name, arguments, runtime.approved, runtime)
                 value = observed(output)
                 ok = succeeded(value)
-                result["tools"].append({"name": name, "ok": bool(ok), "result": value})
-                host.log(db, "tool_finished", {"turn_id": request["turn_id"], "tool": name, "args": safe_args, "result": output, "ok": bool(ok)})
+                note = breaker.record(breaker.key(change, name, arguments), not ok, name, output)
+                if note:
+                    host.log(db, "notice", {"turn_id": request["turn_id"], "text": note})
+                    output += note
+                if ok and name in {"Write", "write_file", "Edit", "MultiEdit"} and output.startswith("Wrote "):
+                    change += 1
+                bounded_value = value
+                serialized = json.dumps(value, ensure_ascii=False)
+                if len(serialized) > 14000:
+                    bounded_value = {"preview": serialized[:14000], "truncated": True}
+                    if isinstance(value, dict): bounded_value.update({k: value[k] for k in ("status", "exit_code", "artifact_id", "sha256", "backend") if k in value})
+                result["tools"].append({"name": name, "ok": bool(ok), "result": bounded_value})
+                host.log(db, "tool_finished", {"turn_id": request["turn_id"], "call_id": item["id"], "tool": name, "args": safe_args, "result": output, "ok": bool(ok)})
                 dialog.append({"role": "tool", "tool_call_id": item["id"], "content": output[:12000]})
                 if not ok:
                     errors += 1
                     if runtime.memory:
                         runtime.memory.episode("failure", request["owner_session_id"], goal, error=output, evidence=name)
-                elif name not in {"Read", "ListDir", "Glob", "Grep", "git_status", "read_file", "list_files", "search_code", "Finish", "finish", "TodoWrite"}:
+                elif name not in {"Read", "ListDir", "Glob", "Grep", "git_status", "read_file", "list_files", "search_code", "Finish", "finish", "TodoWrite", "Task", "SkillsList", "SkillRead", "MemorySearch", "GitStatus", "GitDiff", "GitLog", "MCPList", "Checkpoints", "HooksList", "AgentsList"}:
                     successful_actions += 1
                 # Every generated supported file is attached, even when the model
                 # chose Write/Edit rather than the ArtifactCreate tool.
@@ -167,13 +202,25 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
                         result["artifacts"].append(value)
                 if name in {"Finish", "finish"} and output == "VERIFY":
                     finish = arguments.get("summary", "")
+                if breaker.open:
+                    raise RuntimeError(breaker.reason)
             if finish is not None:
-                if needed and not successful_actions:
-                    result.update(status="planned" if runtime.mode == "plan_only" and not errors else "blocked",
+                if runtime.mode == "plan_only":
+                    result.update(status="planned" if not errors else "blocked", content=finish)
+                elif needed and (not successful_actions or proof_missing()):
+                    result.update(status="blocked",
                                   content=finish if not errors else "لم يُنفذ الإجراء: " + str(result["tools"][-2]["result"] if len(result["tools"]) > 1 else result["tools"][-1]["result"]))
+                    if proof_missing(): result["content"] = proof_missing()
                 else:
+                    configured = host.load(state / "checks.json", [])
+                    if configured and change:
+                        checked = observed(runtime.call("Verify", {}))
+                        result["tools"].append({"name": "Verify", "ok": bool(succeeded(checked)), "result": checked})
+                        host.log(db, "checks_finished", {"turn_id": request["turn_id"], "checks": checked})
+                        if not succeeded(checked): errors += 1
                     for row in result["artifacts"]:
-                        runtime.artifacts.inspect(row["artifact_id"])
+                        proof = runtime.artifact_inspect({"id": row["artifact_id"]})
+                        if not succeeded(proof): raise ValueError("Artifact verification failed")
                     result.update(status="completed" if not errors else "failed", content=finish)
                 break
             if len(dialog) > 40:

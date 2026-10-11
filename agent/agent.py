@@ -75,6 +75,9 @@ def safe_path(root, value, write=False):
 def history(state):
     db = sqlite3.connect(str(state/"events.sqlite3"))
     db.execute("CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, time REAL, kind TEXT, data TEXT)")
+    if "owner" not in {row[1] for row in db.execute("PRAGMA table_info(events)")}:
+        db.execute("ALTER TABLE events ADD COLUMN owner TEXT")
+    db.execute("CREATE INDEX IF NOT EXISTS events_owner_time ON events(owner,time)")
     db.commit()
     return db
 
@@ -90,8 +93,8 @@ def log(db, kind, data):
             return [bounded(v, depth + 1) for v in value[:20]]
         return value
     data = bounded(data)
-    db.execute("INSERT INTO events(time,kind,data) VALUES(?,?,?)",
-               (time.time(),kind,json.dumps(data,ensure_ascii=False)))
+    db.execute("INSERT INTO events(time,kind,data,owner) VALUES(?,?,?,?)",
+               (time.time(),kind,json.dumps(data,ensure_ascii=False),os.environ.get("M4_OWNER_SESSION", "terminal")))
     db.commit()
     # Append a bounded durable stream which Android can read without parsing
     # terminal prose. Secrets/configuration are never added to these events.
@@ -163,42 +166,68 @@ def endpoint():
     selected=routes[0]
     return selected.base_url.rstrip("/")+"/chat/completions",selected.model
 
-def ask(url,model,messages,allow_text=False,require_tools=False):
-    # Only fixed catalog routes. Local services are never reached over a LAN.
-    errors=[]
-    for route in gateway_order(os.environ.get("M4_GATEWAY_FAMILY","freellmpool")):
-        try:
-            payload=json.dumps({"model":route.model,"messages":messages,
-                                "tools":TOOLS,"tool_choice":"auto"},
-                               ensure_ascii=False).encode("utf-8")
-            req=urllib.request.Request(route.base_url.rstrip("/")+"/chat/completions",
-                                       payload,{"Content-Type":"application/json"},method="POST")
-            with urllib.request.urlopen(req,timeout=4 if route.local else 50) as response:
-                reply=json.load(response)["choices"][0]["message"]
-                if not isinstance(reply,dict):
-                    raise ValueError("Invalid model reply")
-                # Coding requires a tool-capable route. A text-only reply cannot
-                # accomplish a file edit and must not stop gateway failover.
-                if not isinstance(reply.get("tool_calls"),list) or not reply["tool_calls"]:
-                    try:
-                        reply["tool_calls"] = prompted_calls(reply.get("content"), ACTIVE_REGISTRY)
-                        reply["m4_tool_mode"] = "prompted"
-                    except ValueError:
-                        if not allow_text or require_tools:
-                            raise
-                        reply["tool_calls"] = []
-                        reply["m4_tool_mode"] = "text"
+def ask(url, model, messages, allow_text=False, require_tools=False, on_event=None):
+    from m4core.provider_health import ProviderHealth, streamed_reply
+    from m4core.registry import provider_calls
+    health, errors = ProviderHealth(), []
+    deadline = time.monotonic() + 150
+    for route in gateway_order(os.environ.get("M4_GATEWAY_FAMILY", "freellmpool")):
+        if time.monotonic() >= deadline: break
+        if not health.available(route.name):
+            errors.append(route.name + ": circuit cooling down")
+            continue
+        started, dialog, native_payload = time.monotonic(), list(messages), True
+        for attempt in range(3):
+            reply = None
+            try:
+                if on_event: on_event("provider_attempt", {"route": route.name, "model": route.model, "attempt": attempt + 1})
+                body = {"model": route.model, "messages": dialog, "stream": bool(on_event)}
+                if native_payload: body.update(tools=TOOLS, tool_choice="auto")
                 else:
-                    reply["m4_tool_mode"] = "native"
+                    body["messages"] = [{"role": "system", "content": "Return only {\"tool_calls\":[{\"name\":...,\"arguments\":{...}}]} for actions. Exact schemas:\n" + json.dumps(TOOLS, ensure_ascii=False)}] + dialog
+                request = urllib.request.Request(route.base_url.rstrip("/") + "/chat/completions", json.dumps(body, ensure_ascii=False).encode(), {"Content-Type": "application/json"}, method="POST")
+                timeout = min(4 if route.local else 30, max(1, deadline - time.monotonic()))
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    if "text/event-stream" in getattr(response, "headers", {}).get("Content-Type", ""):
+                        reply, usage = streamed_reply(response, on_event)
+                    else:
+                        data = json.load(response); reply = data["choices"][0]["message"]; usage = data.get("usage")
+                if not isinstance(reply, dict): raise ValueError("Invalid model reply")
+                if not isinstance(reply.get("tool_calls"), list) or not reply["tool_calls"]:
+                    try:
+                        reply["tool_calls"] = provider_calls(reply.get("content"), ACTIVE_REGISTRY); mode = "prompted"
+                    except ValueError:
+                        if not allow_text or require_tools: raise
+                        reply["tool_calls"], mode = [], "text"
+                else: mode = "native"
+                if len(reply["tool_calls"]) > 4: raise ValueError("Too many tool calls")
                 for call in reply["tool_calls"]:
                     fn = call.get("function", {})
                     ACTIVE_REGISTRY.validate(fn.get("name"), json.loads(fn.get("arguments", "{}")))
-                reply["m4_route"] = route.name
-                reply["m4_model"] = route.model
+                reply.update(m4_route=route.name, m4_model=route.model, m4_usage=usage, m4_tool_mode=mode)
+                health.record(route.name, True, time.monotonic() - started, route.model, mode, usage)
                 return reply
-        except (OSError,KeyError,ValueError,IndexError,TypeError) as error:
-            errors.append(route.name+": "+str(error)[:110])
-    raise RuntimeError("No available tool-call gateway: "+"; ".join(errors[-4:]))
+            except (OSError, KeyError, ValueError, IndexError, TypeError) as error:
+                reason = str(error)[:240]
+                if getattr(error, "code", 0) == 400 and native_payload and attempt < 2:
+                    native_payload = False
+                    if on_event: on_event("provider_repair", {"route": route.name, "reason": "Retry without unsupported native tool parameters"})
+                    continue
+                content = str((reply or {}).get("content") or "").strip()
+                structural = bool((reply or {}).get("tool_calls")) or content.startswith(("{", "```json", "<tool_call>"))
+                if isinstance(error, ValueError) and structural and attempt < 2:
+                    dialog = list(messages) + [{"role": "assistant", "content": content[:12000]}, {"role": "user", "content": "Repair the response as valid JSON tool_calls, with only registered names and schema-valid arguments. Do not add permissions. Validation error: " + reason}]
+                    if on_event: on_event("provider_repair", {"route": route.name, "reason": reason})
+                    continue
+                retry = 0
+                if getattr(error, "code", 0) == 429:
+                    try: retry = min(300, max(5, int(error.headers.get("Retry-After", "60"))))
+                    except (ValueError, AttributeError): retry = 60
+                errors.append(route.name + ": " + reason)
+                health.record(route.name, False, time.monotonic() - started, route.model, error=reason, retry_after=retry)
+                if on_event: on_event("provider_fallback", {"route": route.name, "error": reason})
+                break
+    raise RuntimeError("No available gateway with valid tools: " + "; ".join(errors[-4:]))
 
 def chat_turn(root, state, request, approved=False, permission_mode=None, max_steps=40):
     """Execute ordinary chat through the same real registry and project lock."""
@@ -211,12 +240,33 @@ def chat_turn(root, state, request, approved=False, permission_mode=None, max_st
         except BlockingIOError:
             return dict(turn_id=request["turn_id"], owner_session_id=request["owner_session_id"],
                         status="blocked", content="توجد مهمة أخرى تعمل في المشروع؛ أوقفها أو انتظر اكتمالها", tools=[], artifacts=[])
+        previous_owner = os.environ.get("M4_OWNER_SESSION")
+        previous_turn = os.environ.get("M4_TURN_ID")
+        os.environ["M4_OWNER_SESSION"] = request["owner_session_id"]
+        os.environ["M4_TURN_ID"] = request["turn_id"]
         runtime = ToolRuntime(root, state, safe_path, backup, COMMANDS, command, approved, permission_mode)
         TOOLS, ACTIVE_REGISTRY = runtime.registry.schemas, runtime.registry
         db = history(state)
-        previous_owner = os.environ.get("M4_OWNER_SESSION")
-        os.environ["M4_OWNER_SESSION"] = request["owner_session_id"]
         try:
+            def task_runner(arguments):
+                identifier = uuid.uuid4().hex
+                child_state = state / "subagents" / identifier
+                child_state.mkdir(parents=True)
+                child = ToolRuntime(root, child_state, safe_path, backup, COMMANDS, command, False, "plan_only")
+                child_db = history(child_state)
+                previous_tools, previous_registry = globals()["TOOLS"], globals()["ACTIVE_REGISTRY"]
+                globals()["TOOLS"], globals()["ACTIVE_REGISTRY"] = child.registry.schemas, child.registry
+                child_request = {"owner_session_id": request["owner_session_id"], "turn_id": "subagent-" + identifier,
+                    "messages": [{"role": "user", "content": "Read-only " + arguments.get("type", "reviewer") + ": " + arguments["goal"] + "\nReport observations and limitations. Do not claim you ran tests or made changes."}]}
+                try:
+                    report = run_turn(sys.modules[__name__], root, child_state, child_request, child, child_db, arguments.get("steps", 8))
+                    report.update(agent_id=identifier, permission_mode="plan_only", type=arguments.get("type", "reviewer"))
+                    save(child_state / "report.json", report)
+                    return report
+                finally:
+                    child.close(); child_db.close()
+                    globals()["TOOLS"], globals()["ACTIVE_REGISTRY"] = previous_tools, previous_registry
+            runtime.task_runner = task_runner
             result = run_turn(sys.modules[__name__], root, state, request, runtime, db, max_steps)
             runtime.close()
             log(db, "turn_finished", {"turn_id": request["turn_id"], "status": result["status"], "content": result["content"]})
@@ -229,6 +279,8 @@ def chat_turn(root, state, request, approved=False, permission_mode=None, max_st
                 os.environ.pop("M4_OWNER_SESSION", None)
             else:
                 os.environ["M4_OWNER_SESSION"] = previous_owner
+            if previous_turn is None: os.environ.pop("M4_TURN_ID", None)
+            else: os.environ["M4_TURN_ID"] = previous_turn
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 def verify(root,state,approved):
@@ -507,7 +559,10 @@ def main():
         if not request_path.is_relative_to(private) or request_path.stat().st_size > 500000:
             raise ValueError("Chat request must be in the app-private conversation store")
         request = load(request_path, {})
-        result = chat_turn(root, state, request, args.allow_exec, args.permission_mode, args.steps)
+        try:
+            result = chat_turn(root, state, request, args.allow_exec, args.permission_mode, args.steps)
+        except Exception as error:
+            result = dict(status="blocked", content=str(error)[:2000], turn_id=request.get("turn_id", ""), tools=[], artifacts=[])
         save(request_path.with_name("response.json"), result)
         return 0 if result["status"] in {"completed", "planned"} else 2
     return loop(root,state,getattr(args,"goal",None),args.steps,args.allow_exec,args.permission_mode)

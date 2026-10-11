@@ -76,6 +76,7 @@ object ArtifactRepository {
                 require(hash(temporary) == row.sha256)
                 require(temporary.renameTo(target))
                 File(targetDirectory, "manifest.json").writeText(row.json().toString())
+                com.musabgpt.m4.scheduler.TaskScheduler.event(context, "artifact_created", row.id, row.owner)
             } catch (_: Exception) { /* A partial/untrusted manifest never becomes a chat card. */ }
         }
     }
@@ -98,6 +99,23 @@ object ArtifactRepository {
         .scheme("content").authority(context.packageName + ".artifacts")
         .appendPath(artifact.id).appendPath(artifact.name).build()
 
+    fun inspect(context: Context, owner: String, id: String): JSONObject {
+        val row = list(context, owner).firstOrNull { it.id == id } ?: error("المرفق غير موجود في هذه المحادثة")
+        val bytes = file(context, row.id, row.name)
+        validateFormat(bytes, row.mime)
+        return row.json().put("status", "verified").put("published", true).put("source", "android")
+    }
+
+    fun view(context: Context, owner: String, id: String): JSONObject {
+        inspect(context, owner, id)
+        val row = list(context, owner).first { it.id == id }
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setDataAndType(uri(context, row), row.mime)
+            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try { context.startActivity(intent); row.json().put("status", "dispatched") }
+        catch (_: android.content.ActivityNotFoundException) { row.json().put("status", "unavailable").put("error", "لا يوجد عارض لهذا النوع؛ يمكن حفظه أو مشاركته من البطاقة") }
+    }
+
     fun saveReport(context: Context, owner: String, name: String, text: String): ChatArtifact {
         require(validName(name) && text.length in 1..200000)
         val id = UUID.randomUUID().toString().replace("-", "")
@@ -106,6 +124,56 @@ object ArtifactRepository {
         val row = ChatArtifact(id, owner, name, "text/markdown", file.length(), hash(file), System.currentTimeMillis() / 1000.0)
         File(directory, "manifest.json").writeText(row.json().toString())
         return row
+    }
+
+    fun saveText(context: Context, owner: String, name: String, text: String): ChatArtifact {
+        val extension = name.substringAfterLast('.').lowercase()
+        val mime = mapOf("md" to "text/markdown", "html" to "text/html", "txt" to "text/plain", "json" to "application/json", "py" to "text/x-python", "sh" to "text/x-shellscript")[extension] ?: error("نوع الملف غير مدعوم")
+        require(validName(name) && text.toByteArray().size in 1..500000)
+        val id = UUID.randomUUID().toString().replace("-", "")
+        val directory = File(root(context), id).apply { mkdirs() }
+        val file = File(directory, name).apply { writeText(text) }
+        validateFormat(file, mime)
+        val row = ChatArtifact(id, owner, name, mime, file.length(), hash(file), System.currentTimeMillis() / 1000.0)
+        File(directory, "manifest.json").writeText(row.json().toString())
+        com.musabgpt.m4.scheduler.TaskScheduler.event(context, "artifact_created", id, owner)
+        return row
+    }
+
+    fun importDocument(context: Context, owner: String, uri: Uri): ChatArtifact {
+        val mime = context.contentResolver.getType(uri).orEmpty()
+        val suppliedName = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "import.txt"
+        val name = suppliedName.substringAfterLast('/').replace(Regex("[^\\p{L}\\p{N}_. -]"), "_").trim().take(150).let { if (validName(it)) it else "import.txt" }
+        val output = java.io.ByteArrayOutputStream()
+        context.contentResolver.openInputStream(uri)?.use { input -> val buffer = ByteArray(16384); while (true) { val n = input.read(buffer); if (n < 0) break; require(output.size() + n <= 8000000) { "حد المرفق المستورد 8 ميجابايت" }; output.write(buffer, 0, n) } } ?: error("تعذر قراءة المستند")
+        val bytes = output.toByteArray()
+        return if (mime.startsWith("image/") || mime in setOf("application/pdf", "application/zip")) saveBinary(context, owner, name, mime, bytes)
+        else {
+            require(bytes.size <= 500000 && bytes.none { it == 0.toByte() }) { "ملف نصي كبير أو غير مدعوم" }
+            val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            val text = decoder.decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+            val extension = name.substringAfterLast('.').lowercase()
+            saveText(context, owner, if (extension in setOf("md", "html", "txt", "json", "py", "sh")) name else "$name.txt", text)
+        }
+    }
+
+    fun fork(context: Context, source: String, target: String): Map<String, String> = list(context, source).associate { old ->
+        val id = UUID.randomUUID().toString().replace("-", "")
+        val directory = File(root(context), id).apply { mkdirs() }
+        file(context, old.id, old.name).copyTo(File(directory, old.name))
+        File(directory, "manifest.json").writeText(old.copy(id = id, owner = target).json().toString())
+        old.id to id
+    }
+
+    fun syncImports(context: Context, owner: String) {
+        val project = File(LinuxEnvironment.rootfs(context), "root/projects/M4")
+        require(File(project, ".git").isDirectory) { "المشروع لم يُجهز بعد" }
+        list(context, owner).takeLast(100).forEach { row ->
+            val target = File(project, ".m4/imports/${row.id}/${row.name}")
+            target.parentFile!!.mkdirs()
+            if (!target.exists()) file(context, row.id, row.name).copyTo(target)
+            require(hash(target) == row.sha256) { "تغير الملف المستورد" }
+        }
     }
 
     fun saveBinary(context: Context, owner: String, name: String, mime: String, bytes: ByteArray): ChatArtifact {

@@ -163,7 +163,10 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
         val turn = request.getString("turn_id")
         require(owner.matches(Regex("[A-Za-z0-9-]{1,80}")) && turn.matches(Regex("[A-Za-z0-9-]{1,80}")))
         val directory = File(LinuxEnvironment.rootfs(context), "root/.m4/chats/$owner/$turn")
-        withContext(Dispatchers.IO) { directory.mkdirs(); File(directory, "request.json").writeText(request.toString()) }
+        withContext(Dispatchers.IO) {
+            com.musabgpt.m4.artifacts.ArtifactRepository.syncImports(context, owner)
+            directory.mkdirs(); File(directory, "request.json").writeText(request.toString())
+        }
         val session = chatSession?.takeIf { !it.isFinished && current.sessions().contains(it) }
             ?: current.create(false, true, 24, 80).also { chatSession = it }
         val config = File(directory, "provider.env")

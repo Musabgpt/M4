@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -29,19 +30,31 @@ class M4ChatActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         browser = com.musabgpt.m4.browser.BrowserController(this)
+        if (appEventSent.compareAndSet(false, true)) lifecycleScope.launchWhenStarted {
+            withContext(Dispatchers.IO) { com.musabgpt.m4.scheduler.TaskScheduler.event(this@M4ChatActivity, "app_started", processEventId) }
+        }
         setContent {
             ChatTheme {
                 val vm: ChatViewModel = viewModel()
                 val terminal = vm.terminal
+                val permissionRequest by com.musabgpt.m4.runtime.HostPermissionRequest.pending.collectAsState()
+                val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> com.musabgpt.m4.runtime.HostPermissionRequest.resolve(granted) }
+                LaunchedEffect(permissionRequest) { permissionRequest?.let { permissionLauncher.launch(it) } }
                 val approval by com.musabgpt.m4.runtime.CapabilityBroker.pending.collectAsState()
                 approval?.let { request ->
                     AlertDialog(onDismissRequest = { com.musabgpt.m4.runtime.CapabilityBroker.resolve(request.id, false) },
                         title = { Text("موافقة: ${request.action}") }, text = { Text(request.details) },
-                        confirmButton = { TextButton(onClick = { com.musabgpt.m4.runtime.CapabilityBroker.resolve(request.id, true) }) { Text("السماح مرة") } },
+                        confirmButton = { Column {
+                            TextButton(onClick = { com.musabgpt.m4.runtime.CapabilityBroker.resolve(request.id, true) }) { Text("السماح مرة") }
+                            TextButton(onClick = { com.musabgpt.m4.runtime.CapabilityBroker.resolve(request.id, true, true) }) { Text("السماح بهذا الإجراء في المحادثة") }
+                        } },
                         dismissButton = { TextButton(onClick = { com.musabgpt.m4.runtime.CapabilityBroker.resolve(request.id, false) }) { Text("رفض") } })
                 }
                 val owner by vm.currentId.collectAsState()
                 var panel by rememberSaveable { mutableStateOf("chat") }
+                val requestedPanel by vm.requestedPanel.collectAsState()
+                LaunchedEffect(requestedPanel) { requestedPanel?.let { panel = it; vm.consumedPanel() } }
+                browser.onNavigate = { panel = "browser" }
                 var attachments by remember { mutableStateOf(emptyList<ChatArtifact>()) }
                 var events by remember { mutableStateOf(emptyList<RuntimeEvent>()) }
                 LaunchedEffect(panel) { if (panel == "terminal") terminal.open() }
@@ -57,7 +70,8 @@ class M4ChatActivity : ComponentActivity() {
                 }
                 Column(Modifier.fillMaxSize()) {
                     Box(Modifier.weight(1f)) {
-                        when (panel) {
+                        BrowserPanel(browser)
+                        if (panel != "browser") Surface(Modifier.fillMaxSize()) { when (panel) {
                             "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
                                 runAgent = { goal -> vm.send(goal) },
                                 readAgentProgress = { AgentProgressStore.read(this@M4ChatActivity) },
@@ -65,12 +79,12 @@ class M4ChatActivity : ComponentActivity() {
                             "terminal" -> TerminalPanel(terminal)
                             "files" -> FilesPanel()
                             "tasks" -> SchedulerPanel(owner)
-                            "browser" -> BrowserPanel(browser)
-                        }
+                            "github" -> com.musabgpt.m4.github.GitHubPanel(owner)
+                        } }
                     }
                     HorizontalDivider()
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        listOf("chat" to "محادثة", "terminal" to "طرفية", "files" to "ملفات", "tasks" to "مهام", "browser" to "متصفح").forEach { (key, label) ->
+                    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        listOf("chat" to "محادثة", "terminal" to "طرفية", "files" to "ملفات", "tasks" to "مهام", "browser" to "متصفح", "github" to "GitHub").forEach { (key, label) ->
                             TextButton(onClick = { panel = key; if (key == "terminal") terminal.open() }) {
                                 Text((if (panel == key) "● " else "") + label)
                             }
@@ -81,4 +95,8 @@ class M4ChatActivity : ComponentActivity() {
         }
     }
     override fun onDestroy() { browser.close(); super.onDestroy() }
+    companion object {
+        private val appEventSent = java.util.concurrent.atomic.AtomicBoolean(false)
+        private val processEventId = java.util.UUID.randomUUID().toString()
+    }
 }

@@ -50,8 +50,9 @@ object PhoneAccessibilityTools {
         return current
     }
 
-    fun dispatch(context: Context, action: String, args: JSONObject, owner: String): JSONObject {
+    fun dispatch(context: Context, action: String, args: JSONObject, owner: String, allowSetup: Boolean = true): JSONObject {
         if (UiControlService.current() == null) {
+            if (!allowSetup) return missing()
             val prefs = context.getSharedPreferences("m4_capabilities", 0)
             if (!prefs.getBoolean("accessibility_prompted", false)) {
                 prefs.edit().putBoolean("accessibility_prompted", true).apply()

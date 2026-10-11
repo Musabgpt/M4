@@ -14,7 +14,7 @@ object AlpineCommandRunner {
             return CommandResult("blocked", null, "", "Alpine المدمجة غير جاهزة؛ افتح الطرفية مرة واحدة")
         val libraries = context.applicationInfo.nativeLibraryDir
         val builder = ProcessBuilder(libraries + "/libproot.so", "-r", LinuxEnvironment.rootfs(context).absolutePath,
-            "-0", "-b", "/dev", "-b", "/proc", "-b", "/sys", "-w", "/root/projects/M4", "/bin/bash", "-lc", command)
+            "-0", "-b", "/dev", "-b", "/proc", "-b", "/sys", "-w", "/root/projects/M4", "/usr/bin/python3", "-c", LOCKED_COMMAND, command)
         builder.environment().apply {
             keys.filter { it.endsWith("_TOKEN") || it.endsWith("_KEY") || it.endsWith("_SECRET") || it.endsWith("_PASSWORD") }.forEach { remove(it) }
             put("PROOT_LOADER", libraries + "/libproot-loader.so"); put("PROOT_NO_SECCOMP", "1")
@@ -49,4 +49,15 @@ object AlpineCommandRunner {
         return CommandResult(status ?: if (exit == 0) "succeeded" else "failed", exit,
             synchronized(stdout) { stdout.toString() }, synchronized(stderr) { stderr.toString() }, truncated.get())
     }
+    private val LOCKED_COMMAND = """
+        import fcntl, pathlib, subprocess, sys
+        folder = pathlib.Path('/root/projects/M4/.term-agent')
+        folder.mkdir(exist_ok=True)
+        with (folder/'active.lock').open('a') as lock:
+            try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print('Project busy: another chat or scheduled task holds the lock', file=sys.stderr)
+                sys.exit(75)
+            sys.exit(subprocess.call(['/bin/bash', '-lc', sys.argv[1]]))
+    """.trimIndent()
 }

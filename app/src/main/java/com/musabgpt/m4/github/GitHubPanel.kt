@@ -1,0 +1,58 @@
+package com.musabgpt.m4.github
+
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+@Composable fun GitHubPanel(owner: String) {
+    val context = LocalContext.current
+    val client = remember { GitHubClient(context.applicationContext) }
+    val scope = rememberCoroutineScope()
+    var status by remember { mutableStateOf(client.status().toString()) }
+    var clientId by remember { mutableStateOf(context.getSharedPreferences("m4_github", 0).getString("client_id", "").orEmpty()) }
+    var code by remember { mutableStateOf("") }
+    var repository by remember { mutableStateOf("Musabgpt/M4") }
+    var busy by remember { mutableStateOf(false) }
+    var canceled by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("GitHub • M4 / NewAl", style = MaterialTheme.typography.titleLarge)
+        Text(status, style = MaterialTheme.typography.bodySmall)
+        if (!client.status().optBoolean("client_configured")) {
+            Text("يحتاج المطور client_id لتطبيق OAuth المخصص لـ M4. حساب Codex المتصل هنا لا يرسل اعتماده إلى الهاتف.")
+            OutlinedTextField(clientId, { clientId = it }, label = { Text("OAuth client_id (إعداد المطور)") })
+            TextButton(onClick = { try { client.setClientId(clientId.trim()); status = client.status().toString() } catch (e: Exception) { status = e.message.orEmpty() } }) { Text("حفظ إعداد التطبيق") }
+        }
+        Button(enabled = !busy && client.status().optBoolean("client_configured"), onClick = {
+            busy = true; canceled = false
+            scope.launch {
+                try {
+                    val device = withContext(Dispatchers.IO) { client.beginDeviceFlow() }
+                    code = device.getString("user_code")
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/login/device")))
+                    status = withContext(Dispatchers.IO) { client.finishDeviceFlow(device) { canceled }.toString() }
+                } catch (e: Exception) { status = e.message.orEmpty() }
+                finally { busy = false; code = "" }
+            }
+        }) { Text("ربط الحساب عبر GitHub") }
+        if (code.isNotBlank()) Text("رمز التفويض: $code", style = MaterialTheme.typography.headlineMedium)
+        if (busy) TextButton(onClick = { canceled = true }) { Text("إلغاء التفويض") }
+        OutlinedTextField(repository, { repository = it }, label = { Text("المستودع") })
+        TextButton(enabled = !busy, onClick = { scope.launch {
+            try { status = withContext(Dispatchers.IO) { client.call("runs", org.json.JSONObject().put("repository", repository), owner).toString(2) } }
+            catch (e: Exception) { status = e.message.orEmpty() }
+        } }) { Text("قراءة نتائج Actions الفعلية") }
+        TextButton(onClick = { client.disconnect(); status = client.status().toString() }) { Text("حذف الاتصال من هذا الهاتف") }
+        TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/settings/applications"))) }) { Text("مراجعة تفويض الحساب وإلغاؤه في GitHub") }
+    }
+    DisposableEffect(Unit) { onDispose { canceled = true } }
+}

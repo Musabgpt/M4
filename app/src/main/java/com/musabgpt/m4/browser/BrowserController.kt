@@ -24,6 +24,7 @@ class BrowserController(private val context: Context) {
     private val network = ArrayDeque<JSONObject>()
     @Volatile private var loading: CompletableFuture<JSONObject>? = null
     @Volatile private var artifactOwner: String? = null
+    var onNavigate: (() -> Unit)? = null
     @Volatile var status = "المتصفح جاهز"; private set
     init {
         check(Looper.myLooper() == Looper.getMainLooper())
@@ -63,6 +64,8 @@ class BrowserController(private val context: Context) {
     fun call(action: String, args: JSONObject, owner: String): JSONObject {
         require(Looper.myLooper() != Looper.getMainLooper())
         if (action in setOf("open", "open_artifact")) {
+            synchronized(lock) { console.clear(); network.clear() }
+            AndroidPhoneTools.onMain { onNavigate?.invoke() }
             val next = CompletableFuture<JSONObject>(); loading = next
             if (action == "open_artifact") {
                 ArtifactRepository.importPublished(context)

@@ -9,7 +9,9 @@ object PhoneIntent {
         val match = Regex("^(?:افتح|شغل تطبيق|open|launch)\\s+(?:تطبيق\\s+|برنامج\\s+)?(.{1,100})[.!؟?]?$", RegexOption.IGNORE_CASE).matchEntire(clean) ?: return null
         val target = match.groupValues[1].trim().trimEnd('.', '!', '؟', '?')
         if (target.contains(Regex("(?:\\sو(?:ا|ش|ن|ح|ب)|\\s(?:and|then)\\s)|[;/\\n]"))) return null
-        return target.takeIf { it.isNotBlank() }
+        return target.takeIf { it.isNotBlank() && (alias(it) != normalize(it) ||
+            Regex("^(?:افتح|open|launch)\\s+(?:تطبيق|برنامج|app)\\s+", RegexOption.IGNORE_CASE).containsMatchIn(clean) ||
+            it.matches(Regex("[a-zA-Z][a-zA-Z0-9_]*(?:\\.[a-zA-Z0-9_]+){2,}"))) }
     }
     fun alias(text: String): String = when (normalize(text)) {
         "واتساب", "الواتساب", "واتس اب", "واتس", "whatsapp" -> "com.whatsapp"

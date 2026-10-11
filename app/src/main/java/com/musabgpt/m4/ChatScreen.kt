@@ -53,6 +53,8 @@ import com.musabgpt.m4.artifacts.ArtifactChatCard
 import com.musabgpt.m4.artifacts.ChatArtifact
 import com.musabgpt.m4.runtime.RuntimeEvent
 import com.musabgpt.m4.runtime.InteractiveToolCard
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 private val Clay = Color(0xFFD97757)
 
@@ -123,6 +125,25 @@ fun ChatScreen(
     var showAgentConfirm by remember { mutableStateOf(false) }
     var showAgentProgress by remember { mutableStateOf(false) }
     var agentProgress by remember { mutableStateOf<AgentProgress?>(null) }
+    var search by remember { mutableStateOf("") }
+    var permissionsOpen by remember { mutableStateOf(false) }
+    var rename by remember { mutableStateOf(false) }
+    var title by remember { mutableStateOf("") }
+    var deleteId by remember { mutableStateOf<String?>(null) }
+    var steering by remember { mutableStateOf(false) }
+    var steerText by remember { mutableStateOf("") }
+    val pendingAttachments by vm.pendingAttachments.collectAsState()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::attach) }
+    if (rename) AlertDialog(onDismissRequest = { rename = false }, title = { Text("اسم المحادثة") },
+        text = { OutlinedTextField(title, { title = it }) },
+        confirmButton = { TextButton(onClick = { vm.rename(currentId, title); rename = false }) { Text("حفظ") } },
+        dismissButton = { TextButton(onClick = { rename = false }) { Text("إلغاء") } })
+    deleteId?.let { id -> AlertDialog(onDismissRequest = { deleteId = null }, title = { Text("حذف المحادثة من السجل؟") },
+        text = { Text("ستُحذف رسائل هذه المحادثة. المرفقات المحفوظة تظل متاحة في ملفات التطبيق.") },
+        confirmButton = { TextButton(onClick = { vm.delete(id); deleteId = null }) { Text("حذف") } }, dismissButton = { TextButton(onClick = { deleteId = null }) { Text("إلغاء") } }) }
+    if (steering) AlertDialog(onDismissRequest = { steering = false }, title = { Text("توجيه المهمة الحالية") },
+        text = { OutlinedTextField(steerText, { steerText = it }, label = { Text("تعديل الهدف أو إضافة معلومة") }) },
+        confirmButton = { TextButton(onClick = { vm.steer(steerText); steering = false; steerText = "" }) { Text("إرسال التوجيه") } }, dismissButton = { TextButton(onClick = { steering = false }) { Text("إلغاء") } })
 
 
     if (showAgentConfirm) {
@@ -193,8 +214,15 @@ fun ChatScreen(
                     },
                     modifier = Modifier.padding(horizontal = 12.dp)
                 ) { Text("+ محادثة جديدة", color = Clay) }
+                OutlinedTextField(search, { search = it }, label = { Text("البحث في المحادثات") }, modifier = Modifier.padding(12.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    TextButton(onClick = { title = current.title; rename = true }, enabled = !isStreaming) { Text("تسمية") }
+                    TextButton(onClick = { vm.fork() }, enabled = !isStreaming) { Text("فرع") }
+                    TextButton(onClick = { vm.exportChat() }) { Text("تصدير") }
+                    TextButton(onClick = { deleteId = currentId }, enabled = !isStreaming) { Text("حذف") }
+                }
                 LazyColumn(modifier = Modifier.weight(1f)) {
-                    items(conversations, key = { it.id }) { conv ->
+                    items(conversations.filter { search.isBlank() || it.title.contains(search, true) || it.messages.any { m -> m.content.contains(search, true) } }, key = { it.id }) { conv ->
                         NavigationDrawerItem(
                             label = { Text(conv.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             selected = conv.id == currentId,
@@ -279,6 +307,17 @@ fun ChatScreen(
             },
             bottomBar = {
                 Column {
+                    if (isStreaming) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        TextButton(onClick = vm::pause) { Text("إيقاف مؤقت") }
+                        TextButton(onClick = vm::resume) { Text("متابعة") }
+                        TextButton(onClick = { steering = true }) { Text("توجيه") }
+                    }
+                    if (pendingAttachments.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState())) {
+                        pendingAttachments.forEach { attachment -> AssistChip(onClick = { vm.removeAttachment(attachment.id) }, label = { Text("${attachment.name} ×") }) }
+                    }
+                    if (input.startsWith("/") && !input.contains(' ')) Row(Modifier.horizontalScroll(rememberScrollState())) {
+                        listOf("/tools", "/skills", "/mcp", "/agents", "/hooks", "/terminal", "/termux", "/phone", "/browser", "/artifacts", "/export", "/schedule", "/tasks", "/doctor", "/selftest", "/github", "/permissions", "/rewind", "/cost", "/compact", "/memory", "/init", "/git", "/model", "/status").filter { it.startsWith(input) }.take(12).forEach { suggestion -> TextButton(onClick = { input = suggestion + " " }) { Text(suggestion) } }
+                    }
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 15.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -299,8 +338,13 @@ fun ChatScreen(
                             Spacer(Modifier.width(4.dp))
                             Text("تنفيذ كود")
                         }
-                        TextButton(onClick = { vm.setPlanMode(permissionMode != "plan_only") }) {
-                            Text(if (permissionMode == "plan_only") "تخطيط" else "تنفيذ")
+                        Box {
+                            TextButton(onClick = { permissionsOpen = true }) {
+                                Text(when(permissionMode) { "plan_only" -> "تخطيط"; "ask_always" -> "اسأل دائمًا"; "accept_edits" -> "وافق على التشغيل"; else -> "تنفيذ المشروع" })
+                            }
+                            DropdownMenu(permissionsOpen, { permissionsOpen = false }) {
+                                listOf("auto_project" to "تنفيذ داخل المشروع", "accept_edits" to "تعديل الملفات، اسأل قبل التشغيل", "ask_always" to "اسأل قبل كل تعديل وتشغيل", "plan_only" to "تخطيط للقراءة فقط").forEach { (mode, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { vm.setPermissionMode(mode); permissionsOpen = false }) }
+                            }
                         }
                     }
                     InputBar(
@@ -314,7 +358,8 @@ fun ChatScreen(
                             } else vm.send(input)
                             input = ""
                         },
-                        onStop = vm::stop
+                        onStop = vm::stop,
+                        onAttach = { picker.launch(arrayOf("text/*", "image/*", "application/json", "application/pdf", "application/zip")) }
                     )
                 }
             }
@@ -354,7 +399,7 @@ fun ChatScreen(
                     items(current.messages.reversed(), key = { it.id }) { msg ->
                         MessageRow(
                             msg = msg,
-                            showActions = !(isStreaming && msg.id == lastId)
+                            showActions = !(isStreaming && msg.id == lastId), vm = vm
                         )
                     }
                 }
@@ -364,10 +409,11 @@ fun ChatScreen(
 }
 
 @Composable
-private fun MessageRow(msg: UiMessage, showActions: Boolean) {
+private fun MessageRow(msg: UiMessage, showActions: Boolean, vm: ChatViewModel) {
     val colors = MaterialTheme.colorScheme
 
     if (msg.role == "user") {
+        Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Surface(
                 shape = RoundedCornerShape(18.dp),
@@ -383,6 +429,8 @@ private fun MessageRow(msg: UiMessage, showActions: Boolean) {
                 )
             }
         }
+        if (showActions) MessageActions(msg, vm)
+        }
         return
     }
 
@@ -392,19 +440,28 @@ private fun MessageRow(msg: UiMessage, showActions: Boolean) {
         } else {
             parseBlocks(msg.content).forEach { block ->
                 when (block) {
-                    is Block.Text -> Text(
-                        text = inline(block.value, colors.surfaceVariant),
-                        fontFamily = FontFamily.Serif,
-                        fontSize = 17.sp,
-                        lineHeight = 27.sp,
-                        color = colors.onBackground
-                    )
-                    is Block.Code -> CodeBlock(block.lang, block.value)
+                    is Block.Text -> ChatMarkdown(block.value)
+                    is Block.Code -> CodeBlock(block.lang, block.value, vm)
                 }
             }
-            if (showActions) CopyAction(msg.content)
+            if (showActions) MessageActions(msg, vm)
         }
     }
+}
+
+@Composable
+private fun MessageActions(msg: UiMessage, vm: ChatViewModel) {
+    var editing by remember { mutableStateOf(false) }
+    var edited by remember(msg.id) { mutableStateOf(msg.content) }
+    var rewind by remember { mutableStateOf(false) }
+    Row(Modifier.horizontalScroll(rememberScrollState())) {
+        CopyAction(msg.content)
+        TextButton(onClick = { vm.fork(msg.id) }) { Text("فرع من هنا") }
+        if (msg.role == "user") TextButton(onClick = { editing = true }) { Text("تعديل وإعادة") }
+        if (msg.turnId.isNotBlank()) TextButton(onClick = { rewind = true }) { Text("تراجع") }
+    }
+    if (editing) AlertDialog(onDismissRequest = { editing = false }, title = { Text("تعديل الرسالة في فرع جديد") }, text = { OutlinedTextField(edited, { edited = it }, maxLines = 8) }, confirmButton = { TextButton(onClick = { vm.fork(msg.id, edited); editing = false }) { Text("إعادة الإرسال") } }, dismissButton = { TextButton(onClick = { editing = false }) { Text("إلغاء") } })
+    if (rewind) AlertDialog(onDismissRequest = { rewind = false }, title = { Text("استرجاع الملفات والمحادثة") }, text = { Text("سيُسترجع محتوى ملفات هذه الخطوة قبل تعديلها، ثم تُحذف رسائلها وما بعدها من المحادثة. يتوقف التراجع إذا تغير ملف لاحقًا. الإجراءات خارج الملفات، مثل إرسال رسالة، لا يمكن استرجاعها.") }, confirmButton = { TextButton(onClick = { vm.rewind(msg.turnId); rewind = false }) { Text("استرجاع") } }, dismissButton = { TextButton(onClick = { rewind = false }) { Text("إلغاء") } })
 }
 
 @Composable
@@ -432,7 +489,7 @@ private fun CopyAction(text: String) {
 }
 
 @Composable
-private fun CodeBlock(lang: String, code: String) {
+private fun CodeBlock(lang: String, code: String, vm: ChatViewModel) {
     val colors = MaterialTheme.colorScheme
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
@@ -471,10 +528,14 @@ private fun CodeBlock(lang: String, code: String) {
                     )
                 }
             }
+            Row {
+                TextButton(onClick = { vm.saveCode(lang, code) }) { Text("حفظ كملف") }
+                if (lang.lowercase() in setOf("py", "python", "bash", "sh", "shell")) TextButton(onClick = { vm.send("أنشئ ملفًا لهذا الكود ثم شغله واذكر نتيجة التشغيل الفعلية:\n```$lang\n$code\n```") }) { Text("تشغيل") }
+            }
             // Code always reads left to right, even inside an RTL screen
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 Text(
-                    text = code,
+                    text = highlightedCode(code),
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
@@ -506,7 +567,8 @@ private fun InputBar(
     onTextChange: (String) -> Unit,
     isStreaming: Boolean,
     onSend: () -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onAttach: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
     val canSend = isStreaming || text.isNotBlank()
@@ -528,6 +590,7 @@ private fun InputBar(
                 Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
+                TextButton(onClick = onAttach, enabled = !isStreaming, contentPadding = PaddingValues(4.dp)) { Text("+", style = MaterialTheme.typography.titleLarge) }
                 BasicTextField(
                     value = text,
                     onValueChange = onTextChange,
