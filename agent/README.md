@@ -1,9 +1,18 @@
 # M4 native Arabic Terminal coding agent
 
-The agent executes inside bundled ARM64 Alpine/PRoot, with M4's native PTY. No Termux, external plugin manager, manual API editor or local model importer is involved.
+M4 runs inside the app's bundled ARM64 Alpine/PRoot using the native integrated PTY. No external Termux window or local model download is required.
 
-Seven actual tools: `list_files`, `read_file`, `search_code`, `git_status`, `write_file`, user-authorized `run_command` and independently verified `finish`. Prompt: `system_prompt.md`. Fixed inference catalog: `provider_routes.py`. The native Android launcher selects a gateway family and starts `m4-agent-start`.
+The default `run` and `resume` commands invoke `m4core.runtime` with Read, Write, Edit, MultiEdit, Glob, Grep, ListDir, Bash, BashOutput, KillShell, TodoWrite, GitStatus, GitDiff, GitLog, GitHubPR and Finish. The earlier seven-tool loop remains available through `--legacy`.
 
-FreeLLMPool contributes anonymous HTTPS upstream routes, subject to availability/rate limits. GPT4Free, Free LLM Gateway and FreeLLMAPI are compatibility adapters for genuine local servers, not falsely described as bundled hosted services. An unavailable local server falls back to vetted keyless routes; a model lacking tool calls cannot complete a coding task.
+The live runner provides:
+- Native function calls and text-only model fallback via structured `<m4_call>` blocks.
+- Provider selection through `providers.d`, a health circuit breaker, and bounded requests.
+- Loop detection, context compaction, SQLite event logs, NewAl task checkpoints, backup/rollback, and independent project verification.
+- Permission modes `ask`, `accept_edits` (default), `plan` and `auto`. Shell execution requires `--allow-exec` (and dangerous commands are not automatically approved).
+- Read-only local Git inspection and public GitHub PR lookup. No GitHub write credentials, auto-push or auto-merge.
 
-The worktree and backups persist locally; command execution is powerful and opt-in, not a hardened sandbox. Term Agent uses project tests and bounded checkpoints.
+**Run**: `python3 agent/agent.py --project /path/to/worktree run "your goal" --steps 30 --allow-exec`
+
+**Verify**: `python3 agent/agent.py --project /path/to/worktree check-add "python3 -m unittest discover -s agent_tests -v"`
+
+Run configured checks before marking a task complete. Code execution is powerful and *not* an isolation sandbox. Free inference services may change limits or availability without notice; never assume unlimited use. No APK or phone integration is proven by these Python tests alone.
