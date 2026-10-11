@@ -3,7 +3,8 @@ import re
 
 ASK, ACCEPT_EDITS, PLAN, AUTO = "ask", "accept_edits", "plan", "auto"
 MODES = (ASK, ACCEPT_EDITS, PLAN, AUTO)
-READ_TOOLS = {"Read", "Glob", "Grep", "ListDir", "TodoWrite", "BashOutput", "Finish", "KillShell"}
+READ_TOOLS = {"Read", "Glob", "Grep", "ListDir", "TodoWrite", "BashOutput", "Finish", "KillShell",
+              "GitStatus", "GitDiff", "GitLog", "GitHubPR"}
 EDIT_TOOLS = {"Write", "Edit", "MultiEdit"}
 DANGEROUS = [
     r"\brm\s+-[a-z]*r[a-z]*f?\s+(/|~|\$HOME|\.\.)", r"\bgit\s+push\b.*--force", r"\bgit\s+push\b.*\s-f\b",
