@@ -114,7 +114,7 @@ public final class TerminalService extends Service {
         session.display.resize(rows,cols);
         sessions.add(session);
         selected=session;
-        inform(); startNotification();
+        inform(); 
         new Thread(()->readLoop(session),"arabic-pty-read-"+session.name).start();
         return session;
     }
@@ -125,7 +125,7 @@ public final class TerminalService extends Service {
         }
         session.writer.shutdown();
         if(selected==session)selected=sessions.isEmpty()?null:sessions.get(sessions.size()-1);
-        inform();startNotification();
+        inform();
     }
     public void resize(Session session,int rows,int cols){
         if(session==null)return;
