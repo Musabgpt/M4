@@ -390,8 +390,17 @@ fun ChatScreen(
                 ) {
                     items(artifacts.reversed(), key = { "artifact-" + it.id }) { artifact -> ArtifactChatCard(artifact) }
                     items(current.messages.reversed(), key = { it.id }) { msg ->
+                        // A pre-fix device may retain its old raw Python traceback
+                        // in durable chat history. Render a concise explanation
+                        // while keeping the original bytes in the private archive.
+                        val shown = if (msg.role == "assistant" &&
+                            msg.content.contains("NewAl Code pairing key not found in Termux") &&
+                            msg.content.contains("Traceback (most recent call last)"))
+                            msg.copy(content = "كان إصدار M4 السابق يطلب مفتاح اقتران غير مُجهَّز. " +
+                                "الإصدار المصحح يجهّز NewAl تلقائياً داخل Termux؛ استخدم /setup أو أعد طلبك.")
+                        else msg
                         MessageRow(
-                            msg = msg,
+                            msg = shown,
                             showActions = !(isStreaming && msg.id == lastId), vm = vm
                         )
                     }
