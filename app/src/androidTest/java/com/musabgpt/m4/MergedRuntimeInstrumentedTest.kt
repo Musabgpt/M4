@@ -24,6 +24,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onAllNodesWithText
 
 @RunWith(AndroidJUnit4::class)
@@ -138,10 +139,11 @@ class MergedRuntimeInstrumentedTest {
         activity.onNodeWithTag("chat-plus").performClick()
         activity.onNodeWithTag("chat-terminal-toggle").performClick()
         activity.onNodeWithText("Termux — محرك M4").assertExists()
-        activity.onNodeWithText("نفّذ في Termux").performClick()
-        activity.waitUntil(25000) {
-            activity.onAllNodesWithText("Termux غير مثبت", substring = true).fetchSemanticsNodes().isNotEmpty()
-        }
+        // When Termux is absent, the UI must not expose an executable action.
+        activity.onNodeWithText("نفّذ داخل Termux").assertExists()
+        activity.onNodeWithText("نفّذ داخل Termux").assertIsNotEnabled()
+        activity.onNodeWithText("تجهيز وكيل NewAl تلقائياً").assertIsNotEnabled()
+        activity.onNodeWithText("الحالة: Termux غير مثبت").assertExists()
     }
 
     @Test fun removedArabicTerminalCannotBeLaunchedOrOverlaid() {
