@@ -87,6 +87,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
                 if (service == null) error("انقطع اتصال الطرفية أثناء التجهيز")
                 if (service?.sessions()?.none { it.isLinux && !it.isFinished } == true) service?.create(false, true, 24, 80)
                 preparing = false
+                android.util.Log.i("M4Runtime", "Environment ready")
                 initialized.complete(Unit)
                 ready()
             } catch (e: Exception) { failure(e.message) }
@@ -167,8 +168,10 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
     suspend fun chat(request: JSONObject, family: String, mode: String, event: (RuntimeEvent) -> Unit): JSONObject {
         require(family in setOf("freellmpool", "gpt4free", "free-llm-gateway", "free-llm-api"))
         require(mode in setOf("auto_project", "plan_only", "ask_always", "accept_edits"))
+        android.util.Log.i("M4Runtime", "Chat: requesting execution backend")
         open()
         withTimeout(120000) { initialized.await() }
+        android.util.Log.i("M4Runtime", "Chat: execution backend ready")
         val current = service ?: error("لم تتصل خدمة الطرفية")
         require(LinuxEnvironment.installed(context)) { state.value.status }
         val owner = request.getString("owner_session_id")
@@ -188,6 +191,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
         activeTurn = turn
         val guestDirectory = "/root/.m4/chats/$owner/$turn"
         current.write(session, "M4_AGENT_PROVIDER_FILE=${quote("$guestDirectory/provider.env")} m4-agent-start --chat ${quote("$guestDirectory/request.json")}\n")
+        android.util.Log.i("M4Runtime", "Chat: agent PTY command dispatched")
         var last = 0L
         try {
             return withTimeout(660000) {
@@ -197,7 +201,10 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
                     val response = withContext(Dispatchers.IO) {
                         File(directory, "response.json").takeIf { it.isFile && it.length() in 1..1500000 }?.readText()
                     }
-                    if (response != null) return@withTimeout JSONObject(response)
+                    if (response != null) {
+                        android.util.Log.i("M4Runtime", "Chat: response.json observed")
+                        return@withTimeout JSONObject(response)
+                    }
                     if (session.isFinished) error("انتهت جلسة الوكيل قبل حفظ النتيجة؛ راجع الطرفية")
                     delay(180)
                 }
