@@ -9,7 +9,7 @@ data class CommandResult(val status: String, val exitCode: Int?, val stdout: Str
 
 /** Bounded batch execution in the same private rootfs. This is not an interactive PTY. */
 object AlpineCommandRunner {
-    fun run(context: Context, command: String, stopped: () -> Boolean): CommandResult {
+    fun run(context: Context, command: String, stopped: () -> Boolean, timeoutSeconds: Long = 120L): CommandResult {
         if (!LinuxEnvironment.installed(context) || !LinuxEnvironment.runtimeAvailable(context))
             return CommandResult("blocked", null, "", "Alpine المدمجة غير جاهزة؛ افتح الطرفية مرة واحدة")
         val libraries = context.applicationInfo.nativeLibraryDir
@@ -40,7 +40,9 @@ object AlpineCommandRunner {
             } } catch (_: Exception) { }
         }.apply { isDaemon = true; start() }
         val outReader = reader(process.inputStream, stdout); val errReader = reader(process.errorStream, stderr)
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
+        // Interactive coding runs may be long; lightweight diagnostics can
+        // set a shorter deadline without changing scheduled-task defaults.
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds.coerceIn(1L, 120L))
         var status: String? = null
         while (!process.waitFor(200, TimeUnit.MILLISECONDS)) {
             if (stopped()) { status = "canceled"; break }
