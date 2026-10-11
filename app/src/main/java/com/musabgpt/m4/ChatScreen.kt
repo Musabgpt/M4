@@ -382,6 +382,8 @@ fun ChatScreen(
                             if (input.trim().startsWith("!")) {
                                 vm.recordTerminalRequest(input.trim())
                                 executeCommand(input.trim().drop(1))
+                                terminalExpanded = true
+                                openTerminal()
                             } else vm.send(input)
                             input = ""
                         },
