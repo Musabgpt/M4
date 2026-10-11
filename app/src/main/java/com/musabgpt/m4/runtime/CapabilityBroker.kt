@@ -28,13 +28,9 @@ object CapabilityBroker {
             decision = future
             mutable.value = approval
         }
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            io.musab.arabicterminal.UiControlService.current()?.showApproval(approval.id, approval.action, approval.details)
-        }
         return try { future.get(120, TimeUnit.SECONDS) } catch (_: Exception) { false }
         finally {
             synchronized(lock) { if (decision === future) { decision = null; mutable.value = null } }
-            android.os.Handler(android.os.Looper.getMainLooper()).post { io.musab.arabicterminal.UiControlService.current()?.hideApproval(approval.id) }
         }
     }
 
