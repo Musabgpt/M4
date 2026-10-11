@@ -87,7 +87,7 @@ class M4ChatActivity : ComponentActivity() {
                             "chat" -> ChatScreen(openTerminal = { terminal.open() }, openPanel = { target -> panel = target },
                                 runAgent = { goal -> vm.send(goal) },
                                 readAgentProgress = { AgentProgressStore.read(this@M4ChatActivity) },
-                                artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, loadOlderEvents = { eventLimit = (eventLimit + 200).coerceAtMost(5000) }, vm = vm)
+                                artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command) }, loadOlderEvents = { eventLimit = (eventLimit + 200).coerceAtMost(5000) }, vm = vm)
                             "terminal" -> TerminalPanel(terminal)
                             "files" -> FilesPanel()
                             "tasks" -> SchedulerPanel(owner)
