@@ -20,9 +20,14 @@ import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 import com.musabgpt.m4.runtime.ChatEventStream
 import com.musabgpt.m4.runtime.RuntimeEvent
+import com.musabgpt.m4.ChatApi
+import com.musabgpt.m4.ChatEvent
+import com.musabgpt.m4.ChatMessage
+import com.musabgpt.m4.ProviderCatalog
 import java.io.File
 import java.util.UUID
 import android.util.Log
+import kotlinx.coroutines.flow.collect
 
 data class TerminalSnapshot(
     val status: String = "الطرفية جاهزة للفتح",
@@ -197,6 +202,8 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
         Log.e("M4Runtime", "sending agent command family=$family path=$guestDirectory")
         current.write(session, "M4_AGENT_PROVIDER_FILE=${quote("$guestDirectory/provider.env")} m4-agent-start --chat ${quote("$guestDirectory/request.json")}\n")
         var last = 0L
+        var localFallbackAttempted = false
+        val localFallbackAt = System.nanoTime() + 12_000_000_000L
         try {
             return withTimeout(660000) {
                 while (true) {
@@ -206,6 +213,12 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
                         File(directory, "response.json").takeIf { it.isFile && it.length() in 1..1500000 }?.readText()
                     }
                     if (response != null) return@withTimeout JSONObject(response)
+                    if (!localFallbackAttempted && family != "freellmpool" && System.nanoTime() >= localFallbackAt) {
+                        localFallbackAttempted = true
+                        runCatching { current.write(session, "\u0003") }
+                        val direct = runCatching { directGateway(request, family, turn, event) }.getOrNull()
+                        if (direct != null) return@withTimeout direct
+                    }
                     if (session.isFinished) error("انتهت جلسة الوكيل قبل حفظ النتيجة؛ راجع الطرفية")
                     delay(180)
                 }
@@ -216,6 +229,29 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
             current.write(session, "\u0003")
             throw e
         } finally { activeTurn = null; config.delete() }
+    }
+
+    /** Bounded Android-side rescue for a local gateway that PRoot cannot reach. */
+    private suspend fun directGateway(request: JSONObject, family: String, turn: String, event: (RuntimeEvent) -> Unit): JSONObject {
+        val provider = ProviderCatalog.all.firstOrNull { it.id == family } ?: return JSONObject()
+        val rows = request.optJSONArray("messages") ?: return JSONObject()
+        val history = (0 until rows.length()).mapNotNull { index ->
+            rows.optJSONObject(index)?.let { row ->
+                val role = row.optString("role")
+                val content = row.optString("content")
+                if (role in setOf("user", "assistant") && content.isNotBlank()) ChatMessage(role, content) else null
+            }
+        }
+        val content = StringBuilder()
+        kotlinx.coroutines.withTimeout(15000) {
+            ChatApi.stream(provider, history).collect { item ->
+                when (item) {
+                    is ChatEvent.Route -> event(RuntimeEvent(-1, "provider_route", "", "", item.name, turn))
+                    is ChatEvent.Text -> { content.append(item.value); event(RuntimeEvent(-1, "token", "", "", item.value, turn)) }
+                }
+            }
+        }
+        return JSONObject().put("status", "completed").put("content", content.toString()).put("tools", org.json.JSONArray()).put("artifacts", org.json.JSONArray())
     }
 
     private fun launchAgent(goal: String, owner: String) {
