@@ -132,6 +132,8 @@ def ask_core(router, messages, family="freellmpool"):
 
 def run(host, root, state, goal, max_steps, approved=False, mode="accept_edits"):
     """Drive the actual native-terminal agent while preserving host persistence."""
+    if mode == "auto" and not approved:
+        raise ValueError("Auto mode requires explicit command execution opt-in")
     path = state / "state.json"
     current = host.load(path, {})
     goal = goal or current.get("goal")
@@ -167,6 +169,9 @@ def run(host, root, state, goal, max_steps, approved=False, mode="accept_edits")
             current["step"] += 1
             reply, provider = ask_core(router, dialog, family)
             calls = reply["tool_calls"]
+            # Stable, unique IDs across turns for both native and prompted calls.
+            for idx, call in enumerate(calls):
+                call["id"] = "m4-%d-%d" % (current["step"], idx)
             # Keep exactly the same calls in assistant and tool history.
             dialog.append(reply)
             for call in calls:
