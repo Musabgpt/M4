@@ -54,7 +54,7 @@ android {
         debug {
             // Development builds must NEVER masquerade as an update for
             // the NewAl release package with a different debug key.
-            applicationIdSuffix '.m4dev'
+            applicationIdSuffix '.m4repair'
         }
         release {
             minifyEnabled false
