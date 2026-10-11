@@ -22,6 +22,7 @@ import com.musabgpt.m4.runtime.ChatEventStream
 import com.musabgpt.m4.runtime.RuntimeEvent
 import java.io.File
 import java.util.UUID
+import android.util.Log
 
 data class TerminalSnapshot(
     val status: String = "الطرفية جاهزة للفتح",
@@ -85,7 +86,11 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
                     io.musab.arabicterminal.ProjectBootstrap.ensure(LinuxEnvironment.rootfs(context))
                 }
                 if (service == null) error("انقطع اتصال الطرفية أثناء التجهيز")
-                if (service?.sessions()?.none { it.isLinux && !it.isFinished } == true) service?.create(false, true, 24, 80)
+                if (service?.sessions()?.none { it.isLinux && !it.isFinished } == true) {
+                    chatSession = service?.create(false, true, 24, 80)
+                } else {
+                    chatSession = service?.sessions()?.firstOrNull { it.isLinux && !it.isFinished }
+                }
                 preparing = false
                 initialized.complete(Unit)
                 ready()
@@ -181,6 +186,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
         }
         val session = chatSession?.takeIf { !it.isFinished && current.sessions().contains(it) }
             ?: current.create(false, true, 24, 80).also { chatSession = it }
+        Log.e("M4Runtime", "chat session=${session.name} project=${File(LinuxEnvironment.rootfs(context), "root/projects/M4/.git").isDirectory}")
         awaitShellReady(current, session)
         val config = File(directory, "provider.env")
         config.writeText("export M4_GATEWAY_FAMILY=${quote(family)}\nexport M4_OWNER_SESSION=${quote(owner)}\nexport M4_TURN_ID=${quote(turn)}\nexport M4_PERMISSION_MODE=${quote(mode)}\n")
@@ -188,6 +194,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
         config.setReadable(true, true); config.setWritable(true, true)
         activeTurn = turn
         val guestDirectory = "/root/.m4/chats/$owner/$turn"
+        Log.e("M4Runtime", "sending agent command family=$family path=$guestDirectory")
         current.write(session, "M4_AGENT_PROVIDER_FILE=${quote("$guestDirectory/provider.env")} m4-agent-start --chat ${quote("$guestDirectory/request.json")}\n")
         var last = 0L
         try {
@@ -245,11 +252,15 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
      * agent command before that shell has read its first byte is racy on some
      * emulator kernels, so exchange a visible marker before starting a turn. */
     private suspend fun awaitShellReady(current: TerminalService, session: TerminalService.Session) {
+        Log.e("M4Runtime", "waiting for Alpine shell marker session=${session.name}")
         current.write(session, "printf '__M4_SESSION_READY__\\n'\n")
         withTimeout(20000) {
             while (true) {
                 if (session.isFinished) error("انتهت جلسة الطرفية أثناء تشغيل Alpine")
-                if (session.frame()?.text?.contains("__M4_SESSION_READY__") == true) return@withTimeout
+                if (session.frame()?.text?.contains("__M4_SESSION_READY__") == true) {
+                    Log.e("M4Runtime", "Alpine shell marker received")
+                    return@withTimeout
+                }
                 delay(100)
             }
         }
