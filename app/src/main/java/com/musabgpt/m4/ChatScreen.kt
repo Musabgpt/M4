@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -50,6 +51,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import com.musabgpt.m4.terminal.TerminalPanel
 import com.musabgpt.m4.artifacts.ArtifactChatCard
 import com.musabgpt.m4.artifacts.ChatArtifact
 import com.musabgpt.m4.runtime.RuntimeEvent
@@ -64,13 +66,13 @@ private val Clay = Color(0xFFD97757)
 fun ChatTheme(content: @Composable () -> Unit) {
     val scheme = if (isSystemInDarkTheme()) {
         darkColorScheme(
-            background = Color(0xFF262624),
+            background = Color(0xFF101010),
             onBackground = Color(0xFFF5F4EE),
-            surface = Color(0xFF30302E),
+            surface = Color(0xFF232323),
             onSurface = Color(0xFFF5F4EE),
-            surfaceVariant = Color(0xFF1F1E1D),
+            surfaceVariant = Color(0xFF292929),
             onSurfaceVariant = Color(0xFFA3A199),
-            outline = Color(0xFF4A4945),
+            outline = Color(0xFF3A3A3A),
             primary = Clay,
             onPrimary = Color.White
         )
@@ -101,6 +103,7 @@ private fun greeting(): String {
 @Composable
 fun ChatScreen(
     openTerminal: () -> Unit,
+    openPanel: (String) -> Unit = {},
     runAgent: (String) -> Unit,
     readAgentProgress: () -> AgentProgress?,
     artifacts: List<ChatArtifact> = emptyList(),
@@ -123,6 +126,8 @@ fun ChatScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
+    var terminalExpanded by rememberSaveable { mutableStateOf(false) }
+    var addSheet by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var showAgentConfirm by remember { mutableStateOf(false) }
     var showAgentProgress by remember { mutableStateOf(false) }
@@ -136,6 +141,31 @@ fun ChatScreen(
     var steerText by remember { mutableStateOf("") }
     val pendingAttachments by vm.pendingAttachments.collectAsState()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::attach) }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let(vm::attach) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap -> bitmap?.let(vm::attachCamera) }
+    fun toggleTerminal() {
+        terminalExpanded = !terminalExpanded
+        if (terminalExpanded) openTerminal()
+    }
+    if (addSheet) {
+        ModalBottomSheet(onDismissRequest = { addSheet = false }, containerColor = colors.surface) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("إضافة إلى المحادثة", style = MaterialTheme.typography.titleLarge)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(onClick = { addSheet = false; picker.launch(arrayOf("*/*")) }) { Text("الملفات") }
+                    TextButton(onClick = { addSheet = false; imagePicker.launch("image/*") }) { Text("الصور") }
+                    TextButton(onClick = { addSheet = false; camera.launch(null) }) { Text("الكاميرا") }
+                }
+                HorizontalDivider()
+                TextButton(onClick = { addSheet = false; openPanel("browser") }) { Text("البحث والمتصفح") }
+                TextButton(onClick = { addSheet = false; toggleTerminal() }, modifier = Modifier.testTag("chat-terminal-toggle")) { Text("الطرفية داخل المحادثة") }
+                TextButton(onClick = { addSheet = false; openPanel("tools") }, modifier = Modifier.testTag("sheet-skills")) { Text("المهارات والإضافات") }
+                TextButton(onClick = { addSheet = false; openPanel("tasks") }) { Text("المهام المجدولة") }
+                TextButton(onClick = { addSheet = false; showAgentConfirm = true }, enabled = input.isNotBlank() && !isStreaming) { Text("تنفيذ المشروع باستخدام الأدوات") }
+                TextButton(onClick = { addSheet = false; permissionsOpen = true }) { Text("صلاحيات الوكيل") }
+            }
+        }
+    }
     if (rename) AlertDialog(onDismissRequest = { rename = false }, title = { Text("اسم المحادثة") },
         text = { OutlinedTextField(title, { title = it }) },
         confirmButton = { TextButton(onClick = { vm.rename(currentId, title); rename = false }) { Text("حفظ") } },
@@ -203,7 +233,7 @@ fun ChatScreen(
         drawerContent = {
             ModalDrawerSheet(drawerContainerColor = colors.background) {
                 Text(
-                    "المحادثات",
+                    "M4 — MusabAI",
                     fontFamily = FontFamily.Serif,
                     fontSize = 22.sp,
                     color = colors.onBackground,
@@ -216,6 +246,29 @@ fun ChatScreen(
                     },
                     modifier = Modifier.padding(horizontal = 12.dp)
                 ) { Text("+ محادثة جديدة", color = Clay) }
+                val links = listOf(
+                    "المحادثات" to "chat",
+                    "المشاريع" to "github",
+                    "الكود والطرفية" to "terminal",
+                    "الملفات والمرفقات" to "files",
+                    "المهارات والإضافات" to "tools",
+                    "المهام" to "tasks",
+                    "المتصفح" to "browser"
+                )
+                links.forEach { (label, target) ->
+                    NavigationDrawerItem(
+                        label = { Text(label) },
+                        selected = false,
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            if (target == "terminal") toggleTerminal()
+                            else if (target != "chat") openPanel(target)
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    )
+                }
+                HorizontalDivider()
+                Text("الأخيرة", modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), color = colors.onSurfaceVariant)
                 OutlinedTextField(search, { search = it }, label = { Text("البحث في المحادثات") }, modifier = Modifier.padding(12.dp))
                 Row(Modifier.horizontalScroll(rememberScrollState())) {
                     TextButton(onClick = { title = current.title; rename = true }, enabled = !isStreaming) { Text("تسمية") }
@@ -245,7 +298,7 @@ fun ChatScreen(
                 HorizontalDivider()
                 TextButton(onClick = {
                     scope.launch { drawerState.close() }
-                    openTerminal()
+                    toggleTerminal()
                 }, modifier = Modifier.padding(12.dp)) {
                     Icon(Icons.Filled.Terminal, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -292,15 +345,6 @@ fun ChatScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = {
-                            agentProgress = readAgentProgress()
-                            showAgentProgress = true
-                        }) {
-                            Icon(Icons.Filled.Info, contentDescription = "حالة الوكيل")
-                        }
-                        IconButton(onClick = openTerminal) {
-                            Icon(Icons.Filled.Terminal, contentDescription = "الطرفية العربية")
-                        }
                         IconButton(onClick = vm::newChat) {
                             Icon(Icons.Filled.Add, contentDescription = "محادثة جديدة")
                         }
@@ -320,33 +364,14 @@ fun ChatScreen(
                     if (input.startsWith("/") && !input.contains(' ')) Row(Modifier.horizontalScroll(rememberScrollState())) {
                         listOf("/tools", "/skills", "/mcp", "/agents", "/hooks", "/terminal", "/termux", "/phone", "/browser", "/artifacts", "/export", "/schedule", "/tasks", "/doctor", "/selftest", "/github", "/permissions", "/rewind", "/cost", "/compact", "/memory", "/init", "/git", "/model", "/status").filter { it.startsWith(input) }.take(12).forEach { suggestion -> TextButton(onClick = { input = suggestion + " " }) { Text(suggestion) } }
                     }
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 15.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            activeRoute.ifBlank { "مزودات مجانية • لا مفاتيح يدوية" },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        TextButton(
-                            onClick = { showAgentConfirm = true },
-                            enabled = input.isNotBlank() && !isStreaming
-                        ) {
-                            Icon(Icons.Filled.Code, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("تنفيذ كود")
+                    Box {
+                        DropdownMenu(permissionsOpen, { permissionsOpen = false }) {
+                            listOf("auto_project" to "تنفيذ داخل المشروع", "accept_edits" to "تعديل الملفات، اسأل قبل التشغيل", "ask_always" to "اسأل قبل كل تعديل وتشغيل", "plan_only" to "تخطيط للقراءة فقط").forEach { (mode, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { vm.setPermissionMode(mode); permissionsOpen = false }) }
                         }
-                        Box {
-                            TextButton(onClick = { permissionsOpen = true }) {
-                                Text(when(permissionMode) { "plan_only" -> "تخطيط"; "ask_always" -> "اسأل دائمًا"; "accept_edits" -> "وافق على التشغيل"; else -> "تنفيذ المشروع" })
-                            }
-                            DropdownMenu(permissionsOpen, { permissionsOpen = false }) {
-                                listOf("auto_project" to "تنفيذ داخل المشروع", "accept_edits" to "تعديل الملفات، اسأل قبل التشغيل", "ask_always" to "اسأل قبل كل تعديل وتشغيل", "plan_only" to "تخطيط للقراءة فقط").forEach { (mode, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { vm.setPermissionMode(mode); permissionsOpen = false }) }
-                            }
+                    }
+                    if (terminalExpanded) {
+                        Surface(color = colors.surfaceVariant, modifier = Modifier.fillMaxWidth().height(275.dp).testTag("inline-terminal")) {
+                            TerminalPanel(vm.terminal)
                         }
                     }
                     InputBar(
@@ -357,11 +382,13 @@ fun ChatScreen(
                             if (input.trim().startsWith("!")) {
                                 vm.recordTerminalRequest(input.trim())
                                 executeCommand(input.trim().drop(1))
+                                terminalExpanded = true
+                                openTerminal()
                             } else vm.send(input)
                             input = ""
                         },
                         onStop = vm::stop,
-                        onAttach = { picker.launch(arrayOf("text/*", "image/*", "application/json", "application/pdf", "application/zip")) }
+                        onAttach = { addSheet = true }
                     )
                 }
             }
@@ -381,7 +408,7 @@ fun ChatScreen(
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "كيف أقدر أساعدك اليوم؟",
+                        "كيف أقدر أنفذ مشروعك اليوم؟",
                         fontFamily = FontFamily.Serif,
                         fontSize = 20.sp,
                         color = colors.onSurfaceVariant,
@@ -599,7 +626,7 @@ private fun InputBar(
                 Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
-                TextButton(onClick = onAttach, enabled = !isStreaming, contentPadding = PaddingValues(4.dp)) { Text("+", style = MaterialTheme.typography.titleLarge) }
+                TextButton(onClick = onAttach, enabled = !isStreaming, modifier = Modifier.testTag("chat-plus"), contentPadding = PaddingValues(4.dp)) { Text("+", style = MaterialTheme.typography.titleLarge) }
                 BasicTextField(
                     value = text,
                     onValueChange = onTextChange,
@@ -610,7 +637,7 @@ private fun InputBar(
                     decorationBox = { inner ->
                         Box {
                             if (text.isEmpty()) {
-                                Text("اكتب رسالتك...", fontSize = 16.sp, color = colors.onSurfaceVariant)
+                                Text("تحدث مع M4...", fontSize = 16.sp, color = colors.onSurfaceVariant)
                             }
                             inner()
                         }

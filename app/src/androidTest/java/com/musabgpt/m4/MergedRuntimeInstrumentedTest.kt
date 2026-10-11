@@ -23,13 +23,153 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithText
 
 @RunWith(AndroidJUnit4::class)
 class MergedRuntimeInstrumentedTest {
     @get:Rule val activity = createAndroidComposeRule<M4ChatActivity>()
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val owner = "qa-" + UUID.randomUUID().toString()
-    private fun evidence(name: String, text: String) { File(context.filesDir, "qa").apply { mkdirs() }.resolve(name).writeText(text) }
+    private fun evidence(name: String, text: String) {
+        File(context.filesDir, "qa").apply { mkdirs() }.resolve(name).writeText(text)
+        android.util.Log.i("M4QAReceipt", name + " " + text.take(3500))
+    }
+
+    @Test fun chatActionSheetExposesActualMediaAndInlineTerminal() {
+        activity.onNodeWithTag("chat-plus").performClick()
+        activity.onNodeWithText("الكاميرا").assertExists()
+        activity.onNodeWithTag("sheet-skills").assertExists()
+        activity.onNodeWithTag("chat-terminal-toggle").performClick()
+        activity.onNodeWithTag("inline-terminal").assertExists()
+    }
+
+    @Test fun doctorCommandRunsRealOfflineToolchainChecksFromChat() {
+        lateinit var vm: ChatViewModel
+        activity.runOnIdle {
+            vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
+            vm.newChat()
+            vm.send("/doctor")
+        }
+        activity.waitUntil(180000) {
+            !vm.streaming.value &&
+                vm.conversations.value.first { it.id == vm.currentId.value }
+                    .messages.lastOrNull()?.content?.contains("ملاحظة: هذه البيئة Alpine") == true
+        }
+        val response = vm.conversations.value.first { it.id == vm.currentId.value }.messages.last().content
+        listOf("Python", "Node.js", "Git", "npm", "Bash").forEach { tool ->
+            assertTrue("Actual $tool tool execution failed: $response", response.contains("✅ $tool:"))
+        }
+        assertTrue(response.contains("المحرك المحلي يعمل"))
+        evidence("doctor.json", JSONObject().put("result", response).toString(2))
+    }
+
+    @Test fun realWorkManagerTaskRunsPackagedLinuxAndStoresDurableReceipt() {
+        // A database-only test cannot prove scheduled command execution.
+        LinuxEnvironment.install(context)
+        io.musab.arabicterminal.ProjectBootstrap.ensure(LinuxEnvironment.rootfs(context))
+        val suffix = UUID.randomUUID().toString().take(8)
+        val expected = "M4_TASK_" + suffix
+        val db = TaskDatabase.get(context)
+        val task = db.create("qa background execution", "printf '%s%s' 'M4_TASK_' '" + suffix + "'",
+            owner, "once", 1, true)
+        try {
+            com.musabgpt.m4.scheduler.TaskScheduler.runNow(context, task)
+            activity.waitUntil(90000) {
+                db.lastRun(task.id).contains(expected)
+            }
+            val durable = db.lastRun(task.id)
+            assertTrue("Worker reported no successful run: " + durable, durable.startsWith("succeeded"))
+            assertTrue("Worker did not execute Linux command: " + durable, durable.contains(expected))
+            assertFalse("Once task must be disabled after execution", db.find(task.id)!!.enabled)
+            evidence("workmanager-execution.json", JSONObject()
+                .put("task_id", task.id)
+                .put("report", durable)
+                .put("executed", true).toString(2))
+        } finally {
+            runCatching { com.musabgpt.m4.scheduler.TaskScheduler.pause(context, task.id) }
+            runCatching { db.delete(task.id) }
+        }
+    }
+
+    @Test fun terminalInputFieldReallyExecutesShellFromInsideChat() {
+        lateinit var vm: ChatViewModel
+        activity.runOnIdle {
+            vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
+        }
+        activity.onNodeWithTag("chat-plus").performClick()
+        activity.onNodeWithTag("chat-terminal-toggle").performClick()
+        activity.waitUntil(90000) {
+            val state = vm.terminal.state.value
+            !state.preparing && state.selected?.isLinux == true && !state.selected!!.isFinished
+        }
+        val suffix = UUID.randomUUID().toString().take(8)
+        val expected = "M4_UI_INPUT_" + suffix
+        activity.onNodeWithTag("terminal-command-input").performTextInput(
+            "printf '%s%s' 'M4_UI_INPUT_' '" + suffix + "'"
+        )
+        activity.onNodeWithTag("terminal-command-send").performClick()
+        activity.waitUntil(45000) {
+            vm.terminal.state.value.frame?.text?.contains(expected) == true
+        }
+        evidence("terminal-ui-input.json", JSONObject()
+            .put("verified", expected)
+            .put("entrypoint", "Compose TextField -> native PTY -> Alpine shell")
+            .toString(2))
+    }
+
+    @Test fun interactiveAlpinePtyActuallyExecutesShellCommands() {
+        lateinit var vm: ChatViewModel
+        activity.runOnIdle {
+            vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
+            vm.terminal.open()
+        }
+        activity.waitUntil(90000) {
+            val state = vm.terminal.state.value
+            !state.preparing && state.selected?.isLinux == true && !state.selected!!.isFinished
+        }
+        // The echoed input does not contain this contiguous marker.
+        // Only a shell that really executed printf can produce the full token.
+        val suffix = UUID.randomUUID().toString().take(8)
+        val expected = "M4_EXECUTED_" + suffix
+        vm.terminal.execute("printf '%s%s' 'M4_EXECUTED_' '" + suffix + "'")
+        try {
+            activity.waitUntil(45000) {
+                vm.terminal.state.value.frame?.text?.contains(expected) == true
+            }
+        } catch (failure: Throwable) {
+            val state = vm.terminal.state.value
+            evidence("pty-command-failure.json", JSONObject()
+                .put("session_finished", state.selected?.isFinished ?: true)
+                .put("runtime", state.status)
+                .put("preparing", state.preparing)
+                .put("display_tail", state.frame?.text?.takeLast(1500) ?: "")
+                .put("exception", failure.javaClass.simpleName).toString(2))
+            throw failure
+        }
+        // Verify that the packaged development programs execute, not that the
+        // terminal merely displays their command lines. Split marker literals
+        // inside each command so an input echo cannot satisfy the assertion.
+        val pythonOutput = "M4_PY_" + suffix + "_OK"
+        vm.terminal.execute("python3 -c \"print('M4_' + 'PY_' + '" + suffix + "' + '_OK')\"")
+        activity.waitUntil(45000) {
+            vm.terminal.state.value.frame?.text?.contains(pythonOutput) == true
+        }
+        val nodeOutput = "M4_NODE_" + suffix + "_OK"
+        vm.terminal.execute("node -e \"process.stdout.write('M4_' + 'NODE_' + '" + suffix + "' + '_OK')\"")
+        activity.waitUntil(45000) {
+            vm.terminal.state.value.frame?.text?.contains(nodeOutput) == true
+        }
+        vm.terminal.execute("git --version")
+        activity.waitUntil(45000) {
+            vm.terminal.state.value.frame?.text?.contains("git version ") == true
+        }
+        evidence("pty-command.json", JSONObject()
+            .put("verified_output", expected)
+            .put("verified_python", pythonOutput)
+            .put("verified_node", nodeOutput)
+            .put("verified_git", true)
+            .put("terminal", vm.terminal.state.value.status).toString(2))
+    }
 
     @Test fun firstMessageUsesRealPackagedPythonThroughTheVisibleSendButton() {
         // Only the external model is replaced. Installation, checkout, native
@@ -55,13 +195,36 @@ class MergedRuntimeInstrumentedTest {
         try {
             activity.onNodeWithTag("chat-input").performTextInput("مرحبا")
             activity.onNodeWithTag("chat-send").performClick()
-            activity.waitUntil(180000) { !vm.streaming.value && vm.conversations.value.first { it.id == vm.currentId.value }.messages.any { it.role == "assistant" } }
+            try {
+                activity.waitUntil(180000) {
+                    !vm.streaming.value && vm.conversations.value.first { it.id == vm.currentId.value }.messages.any { it.role == "assistant" }
+                }
+            } catch (failure: Throwable) {
+                val messages = vm.conversations.value.first { it.id == vm.currentId.value }.messages
+                val diagnostics = JSONObject()
+                    .put("streaming", vm.streaming.value)
+                    .put("runtime", vm.terminal.state.value.status)
+                    .put("message_roles", org.json.JSONArray(messages.map { it.role }))
+                    .put("assistant_count", messages.count { it.role == "assistant" })
+                    .put("fixture_received_request", received.get() != null)
+                    .put("alpine_installed", LinuxEnvironment.installed(context))
+                    .put("project_present", File(LinuxEnvironment.rootfs(context), "root/projects/M4/.git").isDirectory)
+                    .put("exception", failure.javaClass.simpleName)
+                    .put("terminal_tail", vm.terminal.state.value.frame?.text?.takeLast(2400) ?: "")
+                    .put("runtime_preparing", vm.terminal.state.value.preparing)
+                evidence("first-message-failure.json", diagnostics.toString(2))
+                throw failure
+            }
             val messages = vm.conversations.value.first { it.id == vm.currentId.value }.messages
             val reply = messages.last { it.role == "assistant" }.content
             evidence("first-message.json", JSONObject().put("reply", reply).put("runtime", vm.terminal.state.value.status).put("model_request_received", received.get() != null).toString(2))
             assertEquals("مرحباً، المحادثة جاهزة.", reply)
             assertTrue(received.get().contains("مرحبا"))
             assertTrue(File(LinuxEnvironment.rootfs(context), "root/projects/M4/.git").isDirectory)
+            assertTrue(
+                "Chat must work without binding/spawning a terminal PTY",
+                vm.terminal.state.value.sessions.isEmpty()
+            )
         } finally { server.close(); fixture.join(1000) }
     }
 

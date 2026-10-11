@@ -10,6 +10,19 @@ if [ "$goal" = "--chat" ]; then
   chat_request="${2:-}"
   test -n "$chat_request" || { echo "Missing chat request" >&2; exit 2; }
 fi
+# A failed shell/Python startup must not strand the native chat for 11 minutes.
+# The ordinary agent remains responsible for its own response on success.
+write_missing_chat_receipt() {
+  rc=$?
+  if [ -n "$chat_request" ]; then
+    response="${chat_request%/*}/response.json"
+    if [ ! -s "$response" ]; then
+      if [ "$rc" -eq 0 ]; then rc=2; fi
+      printf '{"status":"blocked","content":"M4 agent exited before producing a response; inspect the session output","tools":[],"artifacts":[],"exit_code":%s}\n' "$rc" > "$response" || :
+    fi
+  fi
+}
+trap write_missing_chat_receipt EXIT
 if [ -z "$goal" ]; then
   echo "Missing coding goal: m4-agent-start 'Describe a task'" >&2
   exit 2
@@ -60,11 +73,13 @@ echo "Project source: $project"
 echo "Independent Python agent checks configured. Android APK build runs in GitHub CI."
 if [ "${M4_PERMISSION_MODE:-auto_project}" = "plan_only" ]; then
   if [ -n "$chat_request" ]; then
-    exec term-agent chat --request "$chat_request" --steps 40 --permission-mode plan_only
+    term-agent chat --request "$chat_request" --steps 40 --permission-mode plan_only
+    exit $?
   fi
   exec term-agent run "$goal" --steps 40 --permission-mode plan_only
 fi
 if [ -n "$chat_request" ]; then
-  exec term-agent chat --request "$chat_request" --steps 40 --allow-exec --permission-mode "${M4_PERMISSION_MODE:-auto_project}"
+  term-agent chat --request "$chat_request" --steps 40 --allow-exec --permission-mode "${M4_PERMISSION_MODE:-auto_project}"
+  exit $?
 fi
 exec term-agent run "$goal" --steps 40 --allow-exec

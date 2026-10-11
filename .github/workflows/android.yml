@@ -31,6 +31,8 @@ jobs:
           python3 -m unittest discover -s agent_tests -v
           python3 -m py_compile agent/agent.py agent/provider_routes.py agent/newal/continuity.py agent/newal/task_state.py
           bash -n agent/term-agent.sh agent/term-agent-watch.sh agent/m4-agent-start.sh
+      - name: Verify chat startup failure receipts
+        run: bash tests/test_agent_launch_receipt.sh
       - name: تضمين Alpine Linux وPRoot بالتحقق من البصمات
         run: |
           sudo apt-get update -qq
@@ -88,7 +90,22 @@ jobs:
           test -s "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
           sha256sum "$APK" | tee "$APK.sha256"
+      # A separately named, debug-signed ARM64 package for physical device QA.
+      # It uses the .m4dev applicationId and cannot update the original app.
+      # This is never a release and does not use protected signing secrets.
+      - name: Upload ARM64 device QA candidate (NOT an app release)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: M4-ARM64-DEVICE-QA-DEBUG-NOT-RELEASE
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/app-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 7
+
       - name: إيداع APK قابل للتثبيت
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: ArabicTerminal-debug-APK
@@ -98,6 +115,7 @@ jobs:
           if-no-files-found: error
 
       - name: Detect original NewAl signing identity (M4 repository secret)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         id: persistent_signing
         env:
           MUSABAI_RELEASE_SIGNING_BUNDLE: ${{ secrets.MUSABAI_RELEASE_SIGNING_BUNDLE }}

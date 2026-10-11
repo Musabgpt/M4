@@ -57,6 +57,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             _pendingAttachments.value = (_pendingAttachments.value + artifact).distinctBy { it.id }.takeLast(8)
         } catch (e: Exception) { edit(_currentId.value) { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "تعذر استيراد المرفق: ${e.message}")) }; saveHistory() }
     } }
+    fun attachCamera(bitmap: android.graphics.Bitmap) {
+        viewModelScope.launch {
+            try {
+                val owner = _currentId.value
+                val item = withContext(Dispatchers.IO) {
+                    val stream = java.io.ByteArrayOutputStream()
+                    require(bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, stream)) { "تعذر التقاط الصورة" }
+                    com.musabgpt.m4.artifacts.ArtifactRepository.saveBinary(
+                        getApplication(), owner, "camera-"+System.currentTimeMillis()+".jpg", "image/jpeg", stream.toByteArray()
+                    )
+                }
+                _pendingAttachments.value = (_pendingAttachments.value + item).distinctBy { it.id }.takeLast(8)
+            } catch (e: Exception) {
+                edit(_currentId.value) { it.copy(messages = it.messages + UiMessage(role = "assistant", content = "تعذر إرفاق الصورة: "+e.message)) }
+                saveHistory()
+            }
+        }
+    }
     fun removeAttachment(id: String) { _pendingAttachments.value = _pendingAttachments.value.filter { it.id != id } }
     fun saveCode(language: String, code: String) { viewModelScope.launch {
         try { withContext(Dispatchers.IO) {
@@ -211,7 +229,54 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun send(text: String) {
         val clean = text.trim()
         if (clean.isEmpty() || _streaming.value) return
-        if (clean in setOf("/terminal", "/phone", "/browser", "/github", "/tasks", "/termux", "/schedule")) { _requestedPanel.value = when(clean) { "/schedule" -> "tasks"; "/termux" -> "tools"; "/phone" -> "tools"; else -> clean.drop(1) }; return }
+        if (clean in setOf("/terminal", "/phone", "/browser", "/github", "/tasks", "/termux", "/schedule", "/tools", "/files")) {
+            _requestedPanel.value = when (clean) {
+                "/schedule" -> "tasks"
+                "/termux" -> "terminal" // Opens M4\'s integrated Linux terminal; /doctor identifies the actual engine.
+                "/phone" -> "tools"
+                else -> clean.drop(1)
+            }
+            return
+        }
+        if (clean == "/doctor") {
+            val owner = _currentId.value
+            val answer = UiMessage(role = "assistant", content = "جارٍ فحص الأدوات المحلية فعلياً...")
+            edit(owner) { conversation ->
+                conversation.copy(messages = conversation.messages + UiMessage(role = "user", content = clean) + answer)
+            }
+            saveHistory()
+            _streaming.value = true
+            job = viewModelScope.launch {
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        com.musabgpt.m4.terminal.RuntimeDoctor.inspect(getApplication()) {
+                            job?.isCancelled == true
+                        }
+                    }
+                    edit(owner) { c ->
+                        c.copy(messages = c.messages.map {
+                            if (it.id == answer.id) it.copy(content = result.report) else it
+                        })
+                    }
+                } catch (cancel: CancellationException) {
+                    edit(owner) { c ->
+                        c.copy(messages = c.messages.map {
+                            if (it.id == answer.id) it.copy(content = "تم إيقاف الفحص.") else it
+                        })
+                    }
+                } catch (failure: Exception) {
+                    edit(owner) { c ->
+                        c.copy(messages = c.messages.map {
+                            if (it.id == answer.id) it.copy(content = "فشل الفحص المحلي: " + failure.message) else it
+                        })
+                    }
+                } finally {
+                    _streaming.value = false
+                    saveHistory()
+                }
+            }
+            return
+        }
         if (clean == "/export") { exportChat(); return }
         if (clean == "/compact") {
             edit(_currentId.value) { c -> if (c.messages.size <= 20) c else c.copy(messages = listOf(c.messages.first(), UiMessage(role = "assistant", content = "سياق مضغوط: الهدف الأصلي أعلاه؛ حُذفت ${c.messages.size - 17} رسالة من سياق النموذج. المرفقات وسجل الأدوات باقية.\n" + c.messages.filter { it.role == "user" }.takeLast(4).joinToString("\n") { it.content.take(500) })) + c.messages.takeLast(16)) }

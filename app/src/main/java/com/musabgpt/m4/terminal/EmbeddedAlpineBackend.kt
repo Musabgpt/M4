@@ -38,7 +38,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
     private var binding = false
     private var pendingGoal: Pair<String, String>? = null
     private var pendingCommand: String? = null
-    private var chatSession: TerminalService.Session? = null
+    @Volatile private var chatProcess: Process? = null
     private var activeTurn: String? = null
     private var initialized = kotlinx.coroutines.CompletableDeferred<Unit>()
     private var preparing = false
@@ -87,6 +87,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
                 if (service == null) error("انقطع اتصال الطرفية أثناء التجهيز")
                 if (service?.sessions()?.none { it.isLinux && !it.isFinished } == true) service?.create(false, true, 24, 80)
                 preparing = false
+                android.util.Log.i("M4Runtime", "Environment ready")
                 initialized.complete(Unit)
                 ready()
             } catch (e: Exception) { failure(e.message) }
@@ -138,7 +139,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
     fun interrupt() { sendInput("\u0003") }
     fun interruptAgent() {
         activeTurn?.let { turn -> control(turn, "stop") }
-        service?.write(chatSession, "\u0003")
+        chatProcess?.destroy()
     }
     fun control(turn: String, action: String, text: String = "") {
         require(action in setOf("pause", "resume", "stop", "steer"))
@@ -167,10 +168,17 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
     suspend fun chat(request: JSONObject, family: String, mode: String, event: (RuntimeEvent) -> Unit): JSONObject {
         require(family in setOf("freellmpool", "gpt4free", "free-llm-gateway", "free-llm-api"))
         require(mode in setOf("auto_project", "plan_only", "ask_always", "accept_edits"))
-        open()
-        withTimeout(120000) { initialized.await() }
-        val current = service ?: error("لم تتصل خدمة الطرفية")
-        require(LinuxEnvironment.installed(context)) { state.value.status }
+        android.util.Log.i("M4Runtime", "Chat: preparing packaged runtime independently of terminal service")
+        withTimeout(120000) {
+            withContext(Dispatchers.IO) {
+                // No PTY or terminal binding is needed for AI chat. All runtime
+                // installation/checkout operations are synchronized with the
+                // interactive terminal's prepare() implementation.
+                LinuxEnvironment.install(context.applicationContext)
+                io.musab.arabicterminal.ProjectBootstrap.ensure(LinuxEnvironment.rootfs(context))
+            }
+        }
+        android.util.Log.i("M4Runtime", "Chat: packaged runtime ready")
         val owner = request.getString("owner_session_id")
         val turn = request.getString("turn_id")
         require(owner.matches(Regex("[A-Za-z0-9-]{1,80}")) && turn.matches(Regex("[A-Za-z0-9-]{1,80}")))
@@ -179,35 +187,125 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
             com.musabgpt.m4.artifacts.ArtifactRepository.syncImports(context, owner)
             directory.mkdirs(); File(directory, "request.json").writeText(request.toString())
         }
-        val session = chatSession?.takeIf { !it.isFinished && current.sessions().contains(it) }
-            ?: current.create(false, true, 24, 80).also { chatSession = it }
         val config = File(directory, "provider.env")
-        config.writeText("export M4_GATEWAY_FAMILY=${quote(family)}\nexport M4_OWNER_SESSION=${quote(owner)}\nexport M4_TURN_ID=${quote(turn)}\nexport M4_PERMISSION_MODE=${quote(mode)}\n")
-        config.setReadable(false, false); config.setWritable(false, false)
-        config.setReadable(true, true); config.setWritable(true, true)
+        withContext(Dispatchers.IO) {
+            config.writeText(
+                "export M4_GATEWAY_FAMILY=" + quote(family) +
+                "\nexport M4_OWNER_SESSION=" + quote(owner) +
+                "\nexport M4_TURN_ID=" + quote(turn) +
+                "\nexport M4_PERMISSION_MODE=" + quote(mode) + "\n"
+            )
+            config.setReadable(false, false); config.setWritable(false, false)
+            config.setReadable(true, true); config.setWritable(true, true)
+        }
         activeTurn = turn
-        val guestDirectory = "/root/.m4/chats/$owner/$turn"
-        current.write(session, "M4_AGENT_PROVIDER_FILE=${quote("$guestDirectory/provider.env")} m4-agent-start --chat ${quote("$guestDirectory/request.json")}\n")
+        val guestDirectory = "/root/.m4/chats/" + owner + "/" + turn
+        val libraries = context.applicationInfo.nativeLibraryDir
+        val root = LinuxEnvironment.rootfs(context).absolutePath
+        // AI chat must not depend on interactive shell startup or PTY echo.
+        // A separate supervised process keeps the terminal available for TUI work.
+        val command = listOf(
+            libraries + "/libproot.so", "-r", root, "-0",
+            "-b", "/dev", "-b", "/proc", "-b", "/sys",
+            "-w", "/root", "/bin/sh", "/usr/local/bin/m4-agent-start",
+            "--chat", guestDirectory + "/request.json"
+        )
+        val process = try {
+            withContext(Dispatchers.IO) {
+                ProcessBuilder(command).directory(context.cacheDir).redirectErrorStream(true).apply {
+                    environment().apply {
+                        clear()
+                        put("PROOT_LOADER", libraries + "/libproot-loader.so")
+                        put("PROOT_TMP_DIR", context.cacheDir.absolutePath)
+                        put("LD_LIBRARY_PATH", libraries)
+                        put("TMPDIR", context.cacheDir.absolutePath)
+                        put("HOME", "/root")
+                        put("LANG", "C.UTF-8")
+                        put("TERM", "xterm-256color")
+                        put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+                        put("M4_AGENT_PROVIDER_FILE", guestDirectory + "/provider.env")
+                        if (android.os.Build.SUPPORTED_ABIS.firstOrNull() != "x86_64")
+                            put("PROOT_NO_SECCOMP", "1")
+                    }
+                }.start().also { it.outputStream.close() }
+            }
+        } catch (failure: Exception) {
+            withContext(Dispatchers.IO) { config.delete() }
+            activeTurn = null
+            throw java.io.IOException("تعذّر بدء الوكيل داخل PRoot: " + failure.message, failure)
+        }
+        chatProcess = process
+        android.util.Log.i("M4Runtime", "Chat: supervised PRoot agent process started")
+        val consoleTail = StringBuilder()
+        val outputReader = Thread({
+            try {
+                process.inputStream.reader(Charsets.UTF_8).use { stream ->
+                    val chars = CharArray(1024)
+                    while (true) {
+                        val count = stream.read(chars)
+                        if (count < 0) break
+                        synchronized(consoleTail) {
+                            consoleTail.append(chars, 0, count)
+                            if (consoleTail.length > 12000)
+                                consoleTail.delete(0, consoleTail.length - 12000)
+                        }
+                    }
+                }
+            } catch (_: java.io.IOException) { }
+        }, "m4-agent-output").apply { isDaemon = true; start() }
         var last = 0L
         try {
             return withTimeout(660000) {
                 while (true) {
-                    val rows = withContext(Dispatchers.IO) { ChatEventStream.read(context, owner, turn, 300) }
-                    rows.filter { it.id > last }.forEach { row -> event(row); last = maxOf(last, row.id) }
-                    val response = withContext(Dispatchers.IO) {
-                        File(directory, "response.json").takeIf { it.isFile && it.length() in 1..1500000 }?.readText()
+                    val rows = withContext(Dispatchers.IO) {
+                        ChatEventStream.read(context, owner, turn, 300)
                     }
-                    if (response != null) return@withTimeout JSONObject(response)
-                    if (session.isFinished) error("انتهت جلسة الوكيل قبل حفظ النتيجة؛ راجع الطرفية")
+                    rows.filter { it.id > last }.forEach { row ->
+                        event(row); last = maxOf(last, row.id)
+                    }
+                    val response = withContext(Dispatchers.IO) {
+                        File(directory, "response.json")
+                            .takeIf { it.isFile && it.length() in 1..1500000 }?.readText()
+                    }
+                    if (response != null) {
+                        android.util.Log.i("M4Runtime", "Chat: verified response file received")
+                        return@withTimeout JSONObject(response)
+                    }
+                    if (!process.isAlive) {
+                        delay(200)
+                        val finalResponse = withContext(Dispatchers.IO) {
+                            File(directory, "response.json").takeIf { it.isFile }?.readText()
+                        }
+                        if (!finalResponse.isNullOrBlank())
+                            return@withTimeout JSONObject(finalResponse)
+                        val tail = synchronized(consoleTail) { consoleTail.toString().takeLast(1500) }
+                        error("انتهى الوكيل (رمز " + process.exitValue() + ") دون ملف استجابة. " + tail)
+                    }
                     delay(180)
                 }
                 @Suppress("UNREACHABLE_CODE") JSONObject()
             }
-        } catch (e: kotlinx.coroutines.CancellationException) {
+        } catch (cancel: kotlinx.coroutines.CancellationException) {
             control(turn, "stop")
-            current.write(session, "\u0003")
-            throw e
-        } finally { activeTurn = null; config.delete() }
+            process.destroy()
+            throw cancel
+        } finally {
+            activeTurn = null
+            chatProcess = null
+            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                if (process.isAlive && !process.waitFor(1200, java.util.concurrent.TimeUnit.MILLISECONDS))
+                    process.destroy()
+                if (process.isAlive && !process.waitFor(1200, java.util.concurrent.TimeUnit.MILLISECONDS))
+                    process.destroyForcibly()
+                outputReader.join(600)
+                if (!process.isAlive && process.exitValue() != 0) {
+                    val tail = synchronized(consoleTail) { consoleTail.toString().takeLast(4000) }
+                    File(directory, "process-failure.log").writeText(tail)
+                    android.util.Log.w("M4Runtime", "Chat agent failed; private diagnostics written")
+                }
+                config.delete()
+            }
+        }
     }
 
     private fun launchAgent(goal: String, owner: String) {

@@ -37,6 +37,16 @@ docker run --rm --network host -e M4_ALPINE_ARCH \
     test -f /opt/guest/usr/bin/node || test -L /opt/guest/usr/bin/node
   '
 
+# On x86_64 Android emulator, Alpine musl SYS_fork may get ENOSYS.
+# This compatibility libc uses the same Alpine patch set and upstream musl
+# release, changing only syscall selection (clone rather than fork).
+if [ "$M4_ALPINE_ARCH" = "x86_64" ]; then
+  mkdir -p "$STAGING/opt/m4-build"
+  cp "$ROOT/scripts/patch-musl-fork-x86_64.sh" "$STAGING/opt/m4-build/patch-musl-fork-x86_64.sh"
+  docker run --rm --network host -v "$STAGING:/opt/guest" alpine:3.24 \
+    sh /opt/guest/opt/m4-build/patch-musl-fork-x86_64.sh
+fi
+
 # Include the actual M4 source tree from this exact Git revision.
 # git archive excludes .git history, build artifacts and untracked secrets.
 # Recreate a clean local Git baseline for offline, on-device editing.

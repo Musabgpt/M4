@@ -85,7 +85,14 @@ Java_io_musab_arabicterminal_NativePty_start(JNIEnv* env,jclass type,jboolean ro
                 }
             }
             setenv("PROOT_LOADER",loader,1);
+            /* Termux/PRoot issue #390: Android x86_64 emulators can return
+             * ENOSYS on fork/rename when this flag disables PRoot seccomp.
+             * ARM64 devices still need the compatibility fallback. */
+#if defined(__x86_64__)
+            unsetenv("PROOT_NO_SECCOMP");
+#else
             setenv("PROOT_NO_SECCOMP","1",1);
+#endif
             setenv("PROOT_TMP_DIR",temp,1);
             setenv("HOME","/root",1);
             setenv("PATH","/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",1);

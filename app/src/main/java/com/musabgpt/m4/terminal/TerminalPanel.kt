@@ -8,12 +8,16 @@ import android.text.style.ForegroundColorSpan
 import android.view.View
 import android.widget.TextView
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDirection
@@ -23,6 +27,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 fun TerminalPanel(backend: EmbeddedAlpineBackend) {
     val state by backend.state.collectAsState()
     var input by remember { mutableStateOf("") }
+    fun submit() {
+        if (input.isNotBlank() && !state.preparing) {
+            backend.execute(input)
+            input = ""
+        }
+    }
     val outputScroll = rememberScrollState()
     var follow by remember { mutableStateOf(true) }
     LaunchedEffect(state.frame?.text, follow) {
@@ -50,6 +60,7 @@ fun TerminalPanel(backend: EmbeddedAlpineBackend) {
                     setBackgroundColor(0xFF0B1422.toInt())
                     textDirection = View.TEXT_DIRECTION_LTR
                     setPadding(8, 8, 8, 8)
+                    setTextIsSelectable(true)
                 }
             }, update = { view ->
                 val frame = state.frame
@@ -72,14 +83,40 @@ fun TerminalPanel(backend: EmbeddedAlpineBackend) {
                 view.text = text
             })
         }
-        Row {
-            listOf("Esc" to "\u001b", "Tab" to "\t", "↑" to "\u001b[A", "↓" to "\u001b[B").forEach { (label, key) ->
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            listOf(
+                "Esc" to "\u001b",
+                "Tab" to "\t",
+                "↑" to "\u001b[A",
+                "↓" to "\u001b[B",
+                "←" to "\u001b[D",
+                "→" to "\u001b[C",
+                "Ctrl+C" to "\u0003",
+                "Ctrl+D" to "\u0004",
+                "Ctrl+L" to "\u000c",
+                "Ctrl+Z" to "\u001a",
+                "Home" to "\u001b[H",
+                "End" to "\u001b[F"
+            ).forEach { (label, key) ->
                 TextButton(onClick = { backend.sendInput(key) }) { Text(label) }
             }
         }
         Row {
-            OutlinedTextField(value = input, onValueChange = { input = it }, label = { Text("أمر أو إدخال REPL") }, textStyle = TextStyle(textDirection = TextDirection.Ltr), modifier = Modifier.weight(1f))
-            TextButton(onClick = { backend.execute(input); input = "" }, enabled = input.isNotBlank() && !state.preparing) { Text("إرسال") }
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                label = { Text("أمر أو إدخال REPL") },
+                textStyle = TextStyle(textDirection = TextDirection.Ltr),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { submit() }),
+                modifier = Modifier.weight(1f).testTag("terminal-command-input")
+            )
+            TextButton(
+                onClick = { submit() },
+                modifier = Modifier.testTag("terminal-command-send"),
+                enabled = input.isNotBlank() && !state.preparing
+            ) { Text("إرسال") }
         }
     }
 }
