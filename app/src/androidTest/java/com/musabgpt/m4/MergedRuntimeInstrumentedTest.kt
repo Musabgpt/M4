@@ -63,6 +63,34 @@ class MergedRuntimeInstrumentedTest {
         evidence("doctor.json", JSONObject().put("result", response).toString(2))
     }
 
+    @Test fun realWorkManagerTaskRunsPackagedLinuxAndStoresDurableReceipt() {
+        // A database-only test cannot prove scheduled command execution.
+        LinuxEnvironment.install(context)
+        io.musab.arabicterminal.ProjectBootstrap.ensure(LinuxEnvironment.rootfs(context))
+        val suffix = UUID.randomUUID().toString().take(8)
+        val expected = "M4_TASK_" + suffix
+        val db = TaskDatabase.get(context)
+        val task = db.create("qa background execution", "printf '%s%s' 'M4_TASK_' '" + suffix + "'",
+            owner, "once", 1, true)
+        try {
+            com.musabgpt.m4.scheduler.TaskScheduler.runNow(context, task)
+            activity.waitUntil(90000) {
+                db.lastRun(task.id).contains(expected)
+            }
+            val durable = db.lastRun(task.id)
+            assertTrue("Worker reported no successful run: " + durable, durable.startsWith("succeeded"))
+            assertTrue("Worker did not execute Linux command: " + durable, durable.contains(expected))
+            assertFalse("Once task must be disabled after execution", db.find(task.id)!!.enabled)
+            evidence("workmanager-execution.json", JSONObject()
+                .put("task_id", task.id)
+                .put("report", durable)
+                .put("executed", true).toString(2))
+        } finally {
+            runCatching { com.musabgpt.m4.scheduler.TaskScheduler.pause(context, task.id) }
+            runCatching { db.delete(task.id) }
+        }
+    }
+
     @Test fun interactiveAlpinePtyActuallyExecutesShellCommands() {
         lateinit var vm: ChatViewModel
         activity.runOnIdle {
