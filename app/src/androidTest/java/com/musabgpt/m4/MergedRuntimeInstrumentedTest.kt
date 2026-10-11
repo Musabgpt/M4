@@ -51,7 +51,13 @@ class MergedRuntimeInstrumentedTest {
             } }
         }.apply { isDaemon = true; start() }
         lateinit var vm: ChatViewModel
-        activity.runOnIdle { vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]; vm.newChat(); vm.selectProvider(1) }
+        activity.runOnIdle {
+            vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
+            vm.newChat()
+            val gpt4free = vm.providers.value.indexOfFirst { it.id == "gpt4free" }
+            check(gpt4free >= 0) { "GPT4Free provider is missing from the built-in catalog" }
+            vm.selectProvider(gpt4free)
+        }
         try {
             activity.onNodeWithTag("chat-input").performTextInput("مرحبا")
             activity.onNodeWithTag("chat-send").performClick()

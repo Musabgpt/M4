@@ -181,6 +181,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
         }
         val session = chatSession?.takeIf { !it.isFinished && current.sessions().contains(it) }
             ?: current.create(false, true, 24, 80).also { chatSession = it }
+        awaitShellReady(current, session)
         val config = File(directory, "provider.env")
         config.writeText("export M4_GATEWAY_FAMILY=${quote(family)}\nexport M4_OWNER_SESSION=${quote(owner)}\nexport M4_TURN_ID=${quote(turn)}\nexport M4_PERMISSION_MODE=${quote(mode)}\n")
         config.setReadable(false, false); config.setWritable(false, false)
@@ -239,3 +240,17 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
         fun quote(value: String) = "'" + value.replace("'", "'\\''") + "'"
     }
 }
+
+    /** A newly forked PRoot shell can take a moment to exec bash.  Writing the
+     * agent command before that shell has read its first byte is racy on some
+     * emulator kernels, so exchange a visible marker before starting a turn. */
+    private suspend fun awaitShellReady(current: TerminalService, session: TerminalService.Session) {
+        current.write(session, "printf '__M4_SESSION_READY__\\n'\n")
+        withTimeout(20000) {
+            while (true) {
+                if (session.isFinished) error("انتهت جلسة الطرفية أثناء تشغيل Alpine")
+                if (session.frame()?.text?.contains("__M4_SESSION_READY__") == true) return@withTimeout
+                delay(100)
+            }
+        }
+    }
