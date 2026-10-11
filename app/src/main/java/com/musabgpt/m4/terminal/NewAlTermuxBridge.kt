@@ -232,7 +232,7 @@ print(json.dumps({'status':'succeeded','content':answer,'backend':'termux-newal'
             approvalId, baseline.toString(), if (allow) "allow" else "deny"))
         val first = TermuxClient.run(
             context, JSONObject().put("executable", "python")
-                .put("arguments", args).put("timeout", 15), owner
+                .put("arguments", args).put("timeout", 110), owner
         )
         val id = first.optString("command_id")
         val receipt = if (first.optString("status") == "pending_result" && id.isNotBlank()) {
@@ -245,17 +245,49 @@ print(json.dumps({'status':'succeeded','content':answer,'backend':'termux-newal'
                 response
             }
         } else first
-        if (receipt.optString("status") != "succeeded")
-            return JSONObject().put("status", receipt.optString("status", "failed"))
-                .put("content", receipt.optString("error",
-                    receipt.optString("stderr", "لم يكتمل تنفيذ أمر Termux")))
+        if (receipt.optString("status") != "succeeded") {
+            val diagnostic = receipt.optString("stderr") + " " + receipt.optString("error")
+            return JSONObject().put("status", "failed")
+                .put("content", friendlyFailure(diagnostic, receipt.optString("status")))
+                .put("diagnostic_code", diagnosticCode(diagnostic))
+        }
         if (receipt.optBoolean("truncated"))
             return JSONObject().put("status", "failed")
-                .put("content", "نتيجة Termux تجاوزت حجم السجل المسموح؛ لا يمكن تأكيد الرد")
+                .put("content", "نتيجة Termux طويلة جداً؛ لم أعتبرها نجاحاً. افتح فحص المحرك.")
         val stdout = receipt.optString("stdout").trim()
         return runCatching { JSONObject(stdout.substringAfterLast('\n')) }.getOrElse {
             JSONObject().put("status", "failed")
-                .put("content", "خادم NewAl لم يُعد JSON صالحاً: " + stdout.takeLast(300))
+                .put("content", "المحرك لم يُرجع نتيجة يمكن قراءتها. افتح فحص Termux بدلاً من عرض تفاصيل Python.")
         }
     }
+    // Technical stderr stays private in TermuxClient.result.json; chat receives
+    // a task-specific human sentence instead of a Python traceback.
+    private fun diagnosticCode(raw: String): String = when {
+        "M4_BOOTSTRAP_DOWNLOAD_FAILED" in raw -> "bootstrap_network"
+        "M4_BOOTSTRAP_PORT_BUSY" in raw -> "port_in_use"
+        "M4_BOOTSTRAP_SERVER_FAILED" in raw -> "server_start"
+        "M4_BOOTSTRAP_SERVER_TIMEOUT" in raw -> "server_timeout"
+        "No available model" in raw || "No model" in raw -> "model_missing"
+        else -> "termux_execution"
+    }
+
+    private fun friendlyFailure(raw: String, status: String): String = when {
+        "M4_BOOTSTRAP_DOWNLOAD_FAILED" in raw ->
+            "تعذّر تجهيز وكيل NewAl تلقائياً من مستودعك. تأكد من اتصال الإنترنت ثم أعد المحاولة. لا حاجة لمفتاح اقتران يدوي."
+        "M4_BOOTSTRAP_PORT_BUSY" in raw ->
+            "المنفذ المحلي 8791 مستخدم بخادم آخر. أوقف نسخة NewAl القديمة في Termux ثم جرّب مجدداً."
+        "M4_BOOTSTRAP_SERVER_FAILED" in raw || "M4_BOOTSTRAP_SERVER_TIMEOUT" in raw ->
+            "تم تجهيز ملفات NewAl لكن خادمه لم يبدأ. افتح فحص Termux لمراجعة سجل التشغيل المحلي."
+        "M4_BOOTSTRAP_INVALID_KEY" in raw ->
+            "تعذّر تجهيز مفتاح NewAl الآمن. لن أتجاوز التحقق الأمني."
+        "No available model" in raw || "model not configured" in raw.lowercase() ->
+            "NewAl بدأ، لكنه يحتاج مزوّد ذكاء اصطناعي يعمل. افتح إعدادات النموذج داخل التطبيق."
+        status == "permission_required" ->
+            "يلزم منح M4 صلاحية RUN_COMMAND لتشغيل Termux."
+        status == "pending_result" ->
+            "ما زال Termux ينفّذ الأمر؛ لم أصل إلى رد مؤكّد بعد."
+        status == "denied" -> "تم رفض تشغيل الأمر."
+        else -> "تعذّر تنفيذ الوكيل داخل Termux. لم يُنفّذ طلبك بنجاح؛ جرّب فحص المحرك."
+    }
+
 }
