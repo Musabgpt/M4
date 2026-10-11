@@ -55,7 +55,24 @@ class MergedRuntimeInstrumentedTest {
         try {
             activity.onNodeWithTag("chat-input").performTextInput("مرحبا")
             activity.onNodeWithTag("chat-send").performClick()
-            activity.waitUntil(180000) { !vm.streaming.value && vm.conversations.value.first { it.id == vm.currentId.value }.messages.any { it.role == "assistant" } }
+            try {
+                activity.waitUntil(180000) {
+                    !vm.streaming.value && vm.conversations.value.first { it.id == vm.currentId.value }.messages.any { it.role == "assistant" }
+                }
+            } catch (failure: Throwable) {
+                val messages = vm.conversations.value.first { it.id == vm.currentId.value }.messages
+                val diagnostics = JSONObject()
+                    .put("streaming", vm.streaming.value)
+                    .put("runtime", vm.terminal.state.value.status)
+                    .put("message_roles", org.json.JSONArray(messages.map { it.role }))
+                    .put("assistant_count", messages.count { it.role == "assistant" })
+                    .put("fixture_received_request", received.get() != null)
+                    .put("alpine_installed", LinuxEnvironment.installed(context))
+                    .put("project_present", File(LinuxEnvironment.rootfs(context), "root/projects/M4/.git").isDirectory)
+                    .put("exception", failure.javaClass.simpleName)
+                evidence("first-message-failure.json", diagnostics.toString(2))
+                throw failure
+            }
             val messages = vm.conversations.value.first { it.id == vm.currentId.value }.messages
             val reply = messages.last { it.role == "assistant" }.content
             evidence("first-message.json", JSONObject().put("reply", reply).put("runtime", vm.terminal.state.value.status).put("model_request_received", received.get() != null).toString(2))
