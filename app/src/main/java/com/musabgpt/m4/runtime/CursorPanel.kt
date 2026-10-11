@@ -37,7 +37,7 @@ fun CursorPanel(vm: ChatViewModel, open: (String) -> Unit) {
         composer.chunked(2).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { action ->
-                    OutlinedButton(Modifier.weight(1f), onClick = { vm.send(action.command.orEmpty()); open("chat") }) { Text(action.label) }
+                    OutlinedButton(onClick = { vm.send(action.command.orEmpty()); open("chat") }, modifier = Modifier.weight(1f)) { Text(action.label) }
                 }
                 repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
             }
@@ -47,9 +47,9 @@ fun CursorPanel(vm: ChatViewModel, open: (String) -> Unit) {
         integrations.chunked(2).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { action ->
-                    OutlinedButton(Modifier.weight(1f), onClick = {
+                    OutlinedButton(onClick = {
                         action.panel?.let(open) ?: run { vm.send(action.command.orEmpty()); open("chat") }
-                    }) { Text(action.label) }
+                    }, modifier = Modifier.weight(1f)) { Text(action.label) }
                 }
                 repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
             }
