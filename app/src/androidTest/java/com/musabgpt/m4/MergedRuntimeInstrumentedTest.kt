@@ -43,6 +43,26 @@ class MergedRuntimeInstrumentedTest {
         activity.onNodeWithTag("inline-terminal").assertExists()
     }
 
+    @Test fun doctorCommandRunsRealOfflineToolchainChecksFromChat() {
+        lateinit var vm: ChatViewModel
+        activity.runOnIdle {
+            vm = androidx.lifecycle.ViewModelProvider(activity.activity)[ChatViewModel::class.java]
+            vm.newChat()
+            vm.send("/doctor")
+        }
+        activity.waitUntil(180000) {
+            !vm.streaming.value &&
+                vm.conversations.value.first { it.id == vm.currentId.value }
+                    .messages.lastOrNull()?.content?.contains("ملاحظة: هذه البيئة Alpine") == true
+        }
+        val response = vm.conversations.value.first { it.id == vm.currentId.value }.messages.last().content
+        listOf("Python", "Node.js", "Git", "npm", "Bash").forEach { tool ->
+            assertTrue("Actual $tool tool execution failed: $response", response.contains("✅ $tool:"))
+        }
+        assertTrue(response.contains("المحرك المحلي يعمل"))
+        evidence("doctor.json", JSONObject().put("result", response).toString(2))
+    }
+
     @Test fun interactiveAlpinePtyActuallyExecutesShellCommands() {
         lateinit var vm: ChatViewModel
         activity.runOnIdle {
