@@ -56,14 +56,21 @@ sid=sessions.get(owner)
 if sid:
     try: api('/api/sessions/'+sid)
     except Exception: sid=None
+safe_modes={'plan_only':'read-only','ask_always':'ask',
+            'accept_edits':'auto-edit','auto_project':'auto-edit'}
+if mode not in safe_modes: raise ValueError('Unknown M4 permission mode')
+desired=safe_modes[mode]
 if not sid:
-    created=api('/api/sessions',{'root':home,'mode':'read-only' if mode=='plan_only' else 'auto-edit','warm':False})
+    created=api('/api/sessions',{'root':home,'mode':desired,'warm':False})
     sid=created['id']
     sessions[owner]=sid
     temporary=sessions_path+'.tmp'
     with open(temporary,'w',encoding='utf-8') as fh: json.dump(sessions,fh)
     os.chmod(temporary,0o600)
     os.replace(temporary,sessions_path)
+# Each turn must reapply the user's actual M4 permission level.
+# Otherwise a reused NewAl session may keep a more permissive stale mode.
+api('/api/sessions/'+sid+'/settings',{'mode':desired})
 prior=api('/api/sessions/'+sid)
 prior_turn=int((prior.get('meta') or {}).get('turn') or 0)
 sent=api('/api/sessions/'+sid+'/send',{'text':message,'lang':'ar'})
