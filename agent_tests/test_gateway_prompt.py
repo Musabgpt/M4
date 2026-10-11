@@ -22,8 +22,10 @@ class GatewayPromptTests(unittest.TestCase):
                 self.assertEqual(ordered[-1].family,"freellmpool")
     def test_actual_tool_names_in_prompt(self):
         prompt=(HERE/"system_prompt.md").read_text()
-        for name in ("list_files","read_file","search_code","git_status","write_file","run_command","finish"):
+        for name in ("Read","Write","Edit","MultiEdit","Glob","Grep","Bash",
+                     "TodoWrite","GitStatus","GitDiff","GitLog","GitHubPR","Finish"):
             self.assertIn(name,prompt)
+        self.assertIn("--legacy",prompt)
         self.assertNotIn("You are Claude Code",prompt)
     def test_tool_less_provider_falls_back_to_next_route(self):
         import contextlib

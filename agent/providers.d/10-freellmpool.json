@@ -1,0 +1,6 @@
+[
+ {"id":"kilo-auto-free","family":"freellmpool","name":"Kilo Auto Free","base_url":"https://api.kilo.ai/api/gateway","model":"kilo-auto/free","tools":"unknown"},
+ {"id":"llm7-free","family":"freellmpool","name":"LLM7 Free","base_url":"https://api.llm7.io/v1","model":"default","tools":"unknown"},
+ {"id":"pollinations-free","family":"freellmpool","name":"Pollinations Free","base_url":"https://text.pollinations.ai/openai","model":"openai-fast","tools":"unknown"},
+ {"id":"ovh-qwen3-coder","family":"freellmpool","name":"OVHcloud Free","base_url":"https://oai.endpoints.kepler.ai.cloud.ovh.net/v1","model":"Qwen3-Coder-30B-A3B-Instruct","tools":"unknown"}
+]
