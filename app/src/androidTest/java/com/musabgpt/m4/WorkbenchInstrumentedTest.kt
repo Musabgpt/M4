@@ -80,7 +80,7 @@ class WorkbenchInstrumentedTest {
         awaitWorkspace()
         val file = File(LinuxEnvironment.rootfs(ui.activity), "root/projects/M4/inline-qa.txt")
         file.writeText("before")
-        val server = java.net.ServerSocket(1337, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        val server = java.net.ServerSocket(8080, 1, java.net.InetAddress.getByName("127.0.0.1"))
         server.soTimeout = 30000
         val received = java.util.concurrent.atomic.AtomicReference<String>()
         val fixture = Thread {
@@ -109,7 +109,7 @@ class WorkbenchInstrumentedTest {
                 val state = ViewModelProvider(ui.activity)[WorkspaceEditorState::class.java]
                 state.active = EditorDocument(file, "before", ArtifactRepository.hash(file)).also { state.documents.add(it) }
                 val chat = ViewModelProvider(ui.activity)[ChatViewModel::class.java]
-                chat.selectProvider(chat.providers.value.indexOfFirst { it.id == "gpt4free" })
+                chat.selectProvider(chat.providers.value.indexOfFirst { it.id == "free-llm-gateway" })
             }
             ui.onNodeWithText("Edit with AI").performScrollTo().performClick()
             ui.onNodeWithTag("inline-instruction").performTextInput("Replace before with after")
