@@ -6,6 +6,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.musabgpt.m4.*
 import kotlinx.coroutines.*
@@ -26,7 +27,7 @@ fun InlineEditDialog(document: EditorDocument, provider: Provider, close: () -> 
     AlertDialog(onDismissRequest = close, title = { Text("Edit with AI · ${document.file.name}") }, text = {
         Column(Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(provider.name, style = MaterialTheme.typography.labelSmall)
-            OutlinedTextField(instruction, { instruction = it }, enabled = !busy && candidate == null, label = { Text("ما التعديل المطلوب؟") })
+            OutlinedTextField(instruction, { instruction = it }, modifier = Modifier.testTag("inline-instruction"), enabled = !busy && candidate == null, label = { Text("ما التعديل المطلوب؟") })
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (route.isNotBlank()) Text(route, style = MaterialTheme.typography.labelSmall)
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)

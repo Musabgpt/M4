@@ -71,4 +71,51 @@ class WorkbenchInstrumentedTest {
             ui.waitUntil(10000) { file.readText() == "after" }
         } finally { file.delete() }
     }
+
+    @Test fun inlineProposalChangesOnlyBufferAfterAcceptance() {
+        awaitWorkspace()
+        val file = File(LinuxEnvironment.rootfs(ui.activity), "root/projects/M4/inline-qa.txt")
+        file.writeText("before")
+        val server = java.net.ServerSocket(1337, 1, java.net.InetAddress.getByName("127.0.0.1"))
+        server.soTimeout = 30000
+        val received = java.util.concurrent.atomic.AtomicReference<String>()
+        val fixture = Thread {
+            runCatching { server.accept().use { socket ->
+                socket.soTimeout = 10000
+                val input = java.io.DataInputStream(socket.getInputStream())
+                var length = 0
+                while (true) {
+                    val line = input.readLine() ?: break
+                    if (line.isEmpty()) break
+                    if (line.startsWith("Content-Length:", true)) length = line.substringAfter(':').trim().toInt()
+                }
+                require(length in 1..100000)
+                val bytes = ByteArray(length); input.readFully(bytes); received.set(String(bytes, Charsets.UTF_8))
+                val body = org.json.JSONObject().put("choices", org.json.JSONArray().put(
+                    org.json.JSONObject().put("message", org.json.JSONObject().put("content", "```text\nafter\n```"))
+                )).toString().toByteArray()
+                socket.getOutputStream().apply {
+                    write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                    write(body); flush()
+                }
+            } }
+        }.apply { isDaemon = true; start() }
+        try {
+            ui.runOnIdle {
+                val state = ViewModelProvider(ui.activity)[WorkspaceEditorState::class.java]
+                state.active = EditorDocument(file, "before", ArtifactRepository.hash(file)).also { state.documents.add(it) }
+                val chat = ViewModelProvider(ui.activity)[ChatViewModel::class.java]
+                chat.selectProvider(chat.providers.value.indexOfFirst { it.id == "gpt4free" })
+            }
+            ui.onNodeWithText("Edit with AI").performScrollTo().performClick()
+            ui.onNodeWithTag("inline-instruction").performTextInput("Replace before with after")
+            ui.onNodeWithText("اقتراح تعديل").performClick()
+            ui.waitUntil(15000) { ui.onAllNodesWithText("قبول في المحرر").fetchSemanticsNodes().isNotEmpty() }
+            assertEquals("before", file.readText())
+            assertTrue(received.get().contains("before"))
+            ui.onNodeWithText("قبول في المحرر").performClick()
+            ui.onNodeWithTag("code-editor").assertTextEquals("after")
+            assertEquals("before", file.readText())
+        } finally { server.close(); fixture.join(1000); file.delete() }
+    }
 }
