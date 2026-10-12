@@ -13,3 +13,9 @@ trap collect EXIT
 gradle --no-daemon connectedDebugAndroidTest --stacktrace \
   '-Pandroid.testInstrumentationRunnerArguments.class=com.musabgpt.m4.WorkbenchInstrumentedTest#initialExplorerBootstrapsWithoutSendingChatAndNavigationIsVisible'
 gradle --no-daemon connectedDebugAndroidTest --stacktrace
+
+if [ "${M4_TEST_DEVELOPER_HOST:-false}" = "true" ]; then
+    gradle --no-daemon connectedDebugAndroidTest --stacktrace \
+      '-Pandroid.testInstrumentationRunnerArguments.class=com.musabgpt.m4.DeveloperHostInstrumentedTest' \
+      '-Pandroid.testInstrumentationRunnerArguments.developerHost=true'
+fi

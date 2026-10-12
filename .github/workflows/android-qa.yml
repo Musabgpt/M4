@@ -2,13 +2,19 @@ name: M4 — Android runtime evidence
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      developer_host:
+        description: Install and authenticate the optional Code-OSS host on Android
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 65
     env:
+      M4_TEST_DEVELOPER_HOST: ${{ inputs.developer_host || false }}
       M4_TEST_ABIS: x86_64
       M4_RUNTIME_ABI: x86_64
     steps:
