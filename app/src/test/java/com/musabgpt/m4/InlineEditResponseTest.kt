@@ -22,4 +22,17 @@ class InlineEditResponseTest {
         for (index in 0..source.length) assertEquals(index, result.offsetMapping.originalToTransformed(index))
         assertTrue(result.text.spanStyles.isNotEmpty())
     }
+    @Test fun undoRedoAndCompletionRespectCursor() {
+        val doc = com.musabgpt.m4.runtime.EditorDocument(java.io.File("example.kt"), "", "")
+        doc.update(androidx.compose.ui.text.input.TextFieldValue("pri", androidx.compose.ui.text.TextRange(3)))
+        assertTrue(doc.suggestions().contains("private"))
+        doc.complete("private")
+        assertEquals("private", doc.content)
+        doc.undo()
+        assertEquals("pri", doc.content)
+        doc.redo()
+        assertEquals("private", doc.content)
+        doc.find("private")
+        assertEquals(androidx.compose.ui.text.TextRange(0, 7), doc.value.selection)
+    }
 }

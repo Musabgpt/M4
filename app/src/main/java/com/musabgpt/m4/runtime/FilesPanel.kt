@@ -5,6 +5,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,7 +29,43 @@ import java.io.File
 import java.util.UUID
 
 class EditorDocument(val file: File, initial: String, initialHash: String) {
-    var content by mutableStateOf(initial)
+    var value by mutableStateOf(TextFieldValue(initial))
+        private set
+    private val past = mutableStateListOf<TextFieldValue>()
+    private val future = mutableStateListOf<TextFieldValue>()
+    var content: String
+        get() = value.text
+        set(text) { update(TextFieldValue(text, TextRange(text.length))) }
+    val canUndo get() = past.isNotEmpty()
+    val canRedo get() = future.isNotEmpty()
+    fun update(next: TextFieldValue) {
+        if (next.text != value.text) {
+            past.add(value); if (past.size > 20) past.removeAt(0)
+            future.clear()
+        }
+        value = next
+    }
+    fun undo() { if (past.isNotEmpty()) { future.add(value); value = past.removeAt(past.lastIndex) } }
+    fun redo() { if (future.isNotEmpty()) { past.add(value); value = future.removeAt(future.lastIndex) } }
+    fun find(query: String) {
+        if (query.isEmpty()) return
+        val index = value.text.indexOf(query, value.selection.max, ignoreCase = true).takeIf { it >= 0 }
+            ?: value.text.indexOf(query, ignoreCase = true)
+        if (index >= 0) value = value.copy(selection = TextRange(index, index + query.length))
+    }
+    fun prefix(): String = if (!value.selection.collapsed) "" else value.text.take(value.selection.start).takeLastWhile { it.isLetterOrDigit() || it == '_' }
+    fun suggestions(): List<String> {
+        val prefix = prefix()
+        if (prefix.length < 2) return emptyList()
+        return Regex("[A-Za-z_][A-Za-z_0-9]*").findAll(value.text.take(50000)).map { it.value }
+            .plus(sequenceOf("function", "return", "class", "import", "const", "private", "public", "println"))
+            .filter { it.startsWith(prefix) && it != prefix }.distinct().take(6).toList()
+    }
+    fun complete(word: String) {
+        val end = value.selection.start
+        val start = end - prefix().length
+        update(TextFieldValue(value.text.replaceRange(start, end, word), TextRange(start + word.length)))
+    }
     var original by mutableStateOf(initial)
     var hash by mutableStateOf(initialHash)
 }
@@ -81,6 +122,7 @@ fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compos
     var creating by remember { mutableStateOf(false) }
     var filename by remember { mutableStateOf("") }
     var revision by remember { mutableStateOf(0) }
+    var findText by remember { mutableStateOf("") }
     fun allowed(file: File): Boolean {
         val canonical = file.canonicalFile
         return canonical.toPath().startsWith(root.canonicalFile.toPath()) &&
@@ -147,12 +189,24 @@ fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compos
                 TextButton(onClick = { ask = true }) { Text("Ask Agent") }
                 TextButton(onClick = { inlineEdit = true }) { Text("Edit with AI") }
             }
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                OutlinedTextField(findText, { findText = it }, singleLine = true, placeholder = { Text("Find in file") }, modifier = Modifier.weight(1f))
+                TextButton(onClick = { document?.find(findText) }, enabled = findText.isNotEmpty()) { Text("Next") }
+            }
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                TextButton(onClick = { document?.undo() }, enabled = document?.canUndo == true) { Text("Undo") }
+                TextButton(onClick = { document?.redo() }, enabled = document?.canRedo == true) { Text("Redo") }
+                document?.suggestions()?.forEach { suggestion ->
+                    AssistChip(onClick = { document.complete(suggestion) }, label = { Text(suggestion) })
+                }
+            }
             Row(Modifier.weight(1f).verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState())) {
                 Text((1..(content.count { it == '\n' } + 1)).joinToString("\n"),
                     modifier = Modifier.padding(top = 16.dp, end = 8.dp),
                     style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, lineHeight = 22.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(content, { document?.content = it },
+                OutlinedTextField(document?.value ?: TextFieldValue(content), { document?.update(it) },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii),
                     visualTransformation = CodeHighlight,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, lineHeight = 22.sp),
                     modifier = Modifier.testTag("code-editor").width(maxOf(700, (content.lineSequence().maxOfOrNull { it.length } ?: 0).coerceAtMost(500) * 9).dp),

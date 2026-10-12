@@ -65,7 +65,23 @@ checks the original content hash and keeps a backup. Ask Agent sends the current
 file buffer, including unsaved edits, with the user's instruction.
 
 This is an Android workbench implementation, not feature parity with Cursor.
-The editor does not yet provide a language server, syntax highlighting, inline
-AI completions or a VS Code extension host. Integration cards open the actual
+The editor now provides lexical syntax highlighting, local identifier suggestions,
+find, undo/redo and AI whole-file edit proposals with explicit accept/reject. It does
+not yet provide a language server, cursor-level AI completions or a VS Code extension host. Integration cards open the actual
 native connectors; they do not install arbitrary desktop extensions. Termux is
 optional and its installation still uses Android's normal installation flow.
+
+
+### First launch and mobile editor
+
+Opening M4 now prepares its bundled workspace immediately, with visible progress
+and retry on failure; no chat message or terminal launch is required. The phone
+layout uses a full-width editor and four persistent navigation destinations.
+The WebView is attached only while Preview is selected.
+
+The editor supports creating a file without overwriting existing content, lexical
+syntax colors, local identifier completion, find, undo/redo, and AI editing via
+the selected free gateway. AI proposals are limited to 12,000-character source
+files, reviewed before accepting into the buffer, and saved separately through
+the existing hash check and backup flow. Generation errors never replace a file.
+Gateway availability remains dependent on the selected upstream service.
