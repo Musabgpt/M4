@@ -58,8 +58,9 @@ fun ExtensionsPanel(open: (String) -> Unit) {
                             if (missingTermux) runCatching {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/com.termux/")))
                             }.onFailure { error = it.message.orEmpty() }
+                            else if (integration.destination == "developer-host") open("developer-host-install")
                             else open(if (connectGithub) "github-connect" else integration.destination)
-                        }) { Text(when { integration.destination == "developer-host" -> "إعداد المحرر"; missingTermux -> "تثبيت"; connectGithub -> "ربط الحساب"; else -> "فتح" }) }
+                        }) { Text(when { integration.destination == "developer-host" -> "تثبيت وفتح"; missingTermux -> "تثبيت"; connectGithub -> "ربط الحساب"; else -> "فتح" }) }
 
                     }
                 }

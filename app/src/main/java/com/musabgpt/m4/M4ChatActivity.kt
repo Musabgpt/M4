@@ -75,6 +75,7 @@ class M4ChatActivity : ComponentActivity() {
                 com.musabgpt.m4.runtime.WorkbenchShell(panel, { panel = it }) {
                     Box(Modifier.fillMaxSize()) {
                         Surface(Modifier.fillMaxSize()) { when (panel) {
+                        "developer-host-install" -> com.musabgpt.m4.runtime.DeveloperHostPanel(autoStart = true)
                         "developer-host" -> com.musabgpt.m4.runtime.DeveloperHostPanel()
                         "browser" -> BrowserPanel(browser)
                         "cursor" -> com.musabgpt.m4.runtime.FilesPanel(editorState) { prompt -> vm.send(prompt); panel = "chat" }

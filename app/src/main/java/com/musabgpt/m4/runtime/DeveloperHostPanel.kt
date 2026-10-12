@@ -19,8 +19,9 @@ import java.net.URLEncoder
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun DeveloperHostPanel(host: DeveloperHost = androidx.lifecycle.viewmodel.compose.viewModel()) {
+fun DeveloperHostPanel(autoStart: Boolean = false, host: DeveloperHost = androidx.lifecycle.viewmodel.compose.viewModel()) {
     val context = LocalContext.current
+    LaunchedEffect(autoStart) { if (autoStart) host.open(context) }
     val base = host.endpoint
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
