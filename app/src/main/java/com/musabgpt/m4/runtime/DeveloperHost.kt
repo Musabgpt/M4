@@ -106,7 +106,7 @@ class DeveloperHost : ViewModel() {
 
     private fun launchProcess(context: Context, args: List<String>, secret: String? = null): Process {
         val libs = context.applicationInfo.nativeLibraryDir
-        return ProcessBuilder(listOf("$libs/libproot.so", "-r", LinuxEnvironment.rootfs(context).absolutePath,
+        return ProcessBuilder(listOf("$libs/libproot.so", "--kill-on-exit", "-r", LinuxEnvironment.rootfs(context).absolutePath,
             "-0", "-b", "/dev", "-b", "/proc", "-b", "/sys", "-w", "/root/projects/M4") + args).apply {
             redirectErrorStream(true)
             environment().apply {

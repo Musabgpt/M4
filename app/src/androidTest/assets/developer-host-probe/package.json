@@ -1,0 +1,1 @@
+{"name": "m4-language-probe", "publisher": "m4qa", "version": "0.0.1", "engines": {"vscode": "^1.90.0"}, "main": "./extension.js", "activationEvents": ["onStartupFinished"], "capabilities": {"untrustedWorkspaces": {"supported": true}}}

@@ -53,6 +53,23 @@ class DeveloperHostInstrumentedTest {
                 assertEquals(200, editor.responseCode)
                 assertTrue(editor.inputStream.bufferedReader().use { it.readText().contains("workbench") })
             } finally { editor.disconnect() }
+            val runtimeRoot = io.musab.arabicterminal.LinuxEnvironment.rootfs(activity.activity)
+            val resultFile = File(runtimeRoot, "tmp/m4-language-receipt.json")
+            resultFile.delete()
+            // Trust only this test fixture, never change the production default.
+            val settings = File(runtimeRoot, "root/.local/share/m4-code/user-data/User/settings.json")
+            settings.writeText(org.json.JSONObject(settings.readText()).put("security.workspace.trust.enabled", false).toString())
+            val archive = File(runtimeRoot, "root/.m4/m4-language-probe.vsix")
+            java.util.zip.ZipOutputStream(archive.outputStream()).use { zip ->
+                for (name in listOf("package.json", "extension.js")) {
+                    zip.putNextEntry(java.util.zip.ZipEntry("extension/$name"))
+                    InstrumentationRegistry.getInstrumentation().context.assets.open("developer-host-probe/$name").use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+            }
+            val installed = com.musabgpt.m4.scheduler.AlpineCommandRunner.run(activity.activity,
+                DeveloperHost.BINARY + " --extensions-dir /root/.local/share/m4-code/extensions --install-extension /root/.m4/m4-language-probe.vsix") { false }
+            assertEquals(installed.stdout + installed.stderr, "succeeded", installed.status)
             activity.onNodeWithTag("workbench-tools").performClick()
             activity.onNodeWithText("تثبيت وفتح").performClick()
             val rendered = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -72,8 +89,18 @@ class DeveloperHostInstrumentedTest {
                 rendered.get()
             }
             assertTrue("Authenticated editor must render inside the Android WebView", rendered.get())
-            File(activity.activity.filesDir, "qa").apply { mkdirs() }.resolve("developer-host.txt")
-                .writeText("Actual Android PRoot install, authenticated HTTP and Android WebView workbench rendering passed.\nExtension activation and language-server responses are separate checks.\n")
+            activity.waitUntil(120000) { resultFile.isFile && runCatching { org.json.JSONObject(resultFile.readText()).has("items") }.getOrDefault(false) }
+            val receipt = org.json.JSONObject(resultFile.readText())
+            val items = receipt.getJSONArray("items")
+            for (label in listOf("name", "age")) assertTrue("Missing typed property: $label",
+                (0 until items.length()).any { items.getJSONObject(it).optString("label") == label && items.getJSONObject(it).optInt("kind") == 4 })
+            val pipes = InstrumentationRegistry.getInstrumentation().uiAutomation
+                .executeShellCommandRw("dd of=/data/local/tmp/m4-developer-host.txt")
+            android.os.ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use { it.write(receipt.toString(2).toByteArray()) }
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(pipes[0]).use { it.readBytes() }
+            activity.runOnIdle { host.stop() }
+            activity.waitUntil(10000) { host.endpoint == null }
+            assertFalse("Stop must close the listening socket", runCatching { connection("/login").let { try { it.responseCode } finally { it.disconnect() } } }.isSuccess)
         } finally { activity.runOnIdle { host.stop() } }
     }
 }

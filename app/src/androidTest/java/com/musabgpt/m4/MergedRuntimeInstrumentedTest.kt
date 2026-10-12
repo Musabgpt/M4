@@ -89,9 +89,12 @@ class MergedRuntimeInstrumentedTest {
             // Preserve the application surface separately from the full-device image:
             // unrelated emulator/system dialogs remain visible in the latter.
             val chatBitmap = activity.onRoot().captureToImage().asAndroidBitmap()
-            File(context.filesDir, "qa/agent-app-surface.png").outputStream().use {
+            val capturePipes = InstrumentationRegistry.getInstrumentation().uiAutomation
+                .executeShellCommandRw("dd of=/data/local/tmp/m4-agent-app-surface.png")
+            ParcelFileDescriptor.AutoCloseOutputStream(capturePipes[1]).use {
                 chatBitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
             }
+            ParcelFileDescriptor.AutoCloseInputStream(capturePipes[0]).use { it.readBytes() }
             android.os.ParcelFileDescriptor.AutoCloseInputStream(
                 InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("screencap -p /data/local/tmp/m4-agent-conversation.png")
             ).use { it.readBytes() }
