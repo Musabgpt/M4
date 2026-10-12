@@ -40,4 +40,8 @@ class InlineEditResponseTest {
         assertEquals("Created calculator.html with HTML.", value.text)
         assertEquals(2, value.spanStyles.size)
     }
+    @Test fun aiCursorCompletionPreservesSurroundingSource() {
+        assertEquals("const answer = 42;", com.musabgpt.m4.runtime.applyCursorCompletion("const answer = ;", 15, 15, "42"))
+        assertEquals("aNEWz", com.musabgpt.m4.runtime.applyCursorCompletion("aOLDz", 1, 4, "NEW"))
+    }
 }

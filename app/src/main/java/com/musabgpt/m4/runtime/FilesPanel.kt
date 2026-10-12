@@ -119,6 +119,7 @@ fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compos
     var ask by remember { mutableStateOf(false) }
     var instruction by remember { mutableStateOf("") }
     var inlineEdit by remember { mutableStateOf(false) }
+    var cursorCompletion by remember { mutableStateOf(false) }
     var creating by remember { mutableStateOf(false) }
     var filename by remember { mutableStateOf("") }
     var revision by remember { mutableStateOf(0) }
@@ -187,7 +188,8 @@ fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compos
                 TextButton(onClick = { state.active = null }) { Text("رجوع") }
                 TextButton(onClick = { diff = true }, enabled = original != content) { Text("Review") }
                 TextButton(onClick = { ask = true }) { Text("Ask Agent") }
-                TextButton(onClick = { inlineEdit = true }) { Text("Edit with AI") }
+                TextButton(onClick = { cursorCompletion = false; inlineEdit = true }) { Text("Edit with AI") }
+                TextButton(onClick = { cursorCompletion = true; inlineEdit = true }) { Text("AI Complete") }
             }
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 OutlinedTextField(findText, { findText = it }, singleLine = true, placeholder = { Text("Find in file") }, modifier = Modifier.weight(1f))
@@ -218,7 +220,7 @@ fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compos
             }
         }
     }
-    if (inlineEdit && document != null) InlineEditDialog(document, providers[providerIndex.coerceIn(providers.indices)]) { inlineEdit = false }
+    if (inlineEdit && document != null) InlineEditDialog(document, providers[providerIndex.coerceIn(providers.indices)], atCursor = cursorCompletion) { inlineEdit = false }
     if (creating) AlertDialog(onDismissRequest = { creating = false }, title = { Text("New file") },
         text = { OutlinedTextField(filename, { filename = it }, singleLine = true, label = { Text("Filename") }) },
         confirmButton = { TextButton(enabled = filename.isNotBlank(), onClick = { scope.launch {
