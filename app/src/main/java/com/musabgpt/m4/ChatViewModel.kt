@@ -267,7 +267,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         .put("attachments", JSONArray(attached.map { it.json().put("path", ".m4/imports/${it.id}/${it.name}") }))
                     terminal.chat(request, primary.id, _permissionMode.value) { event ->
                         if (event.kind == "provider_route") {
-                            _activeRoute.value = "المسار الفعلي: " + event.result
+                            _activeRoute.value = runCatching { JSONObject(event.result).optString("route", selected.name) }.getOrDefault(selected.name)
                         } else if (event.kind == "token") edit(convId) { c ->
                             c.copy(messages = c.messages.map { if (it.id == reply.id) it.copy(content = it.content + event.result) else it })
                         }

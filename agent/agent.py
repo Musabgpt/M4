@@ -5,6 +5,7 @@ import hashlib
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import shutil
@@ -208,7 +209,9 @@ def ask(url, model, messages, allow_text=False, require_tools=False, on_event=No
                     try:
                         reply["tool_calls"] = provider_calls(reply.get("content"), ACTIVE_REGISTRY); mode = "prompted"
                     except ValueError:
-                        if not allow_text or require_tools: raise
+                        content = str(reply.get("content") or "")
+                        narrated_call = (require_tools or any(m.get("role") == "tool" for m in messages)) and any(re.search(r"\b" + re.escape(name) + r"\b", content) for name in ACTIVE_REGISTRY.entries) and bool(re.search(r"استدعاء|معاملات|arguments|tool.?call|```json", content, re.I))
+                        if not allow_text or require_tools or narrated_call: raise
                         reply["tool_calls"], mode = [], "text"
                 else: mode = "native"
                 if len(reply["tool_calls"]) > 4: raise ValueError("Too many tool calls")
@@ -226,7 +229,7 @@ def ask(url, model, messages, allow_text=False, require_tools=False, on_event=No
                     if on_event: on_event("provider_repair", {"route": route.name, "reason": "Retry without unsupported native tool parameters"})
                     continue
                 content = str((reply or {}).get("content") or "").strip()
-                structural = bool((reply or {}).get("tool_calls")) or content.startswith(("{", "```json", "<tool_call>"))
+                structural = bool((reply or {}).get("tool_calls")) or content.startswith(("{", "```json", "<tool_call>")) or (require_tools and any(name in content for name in ACTIVE_REGISTRY.entries)) or bool(re.search(r"استدعاء|tool.?call", content, re.I))
                 if isinstance(error, ValueError) and structural and attempt < 2:
                     dialog = list(messages) + [{"role": "assistant", "content": content[:12000]}, {"role": "user", "content": "Repair the response as valid JSON tool_calls, with only registered names and schema-valid arguments. Do not add permissions. Validation error: " + reason}]
                     if on_event: on_event("provider_repair", {"route": route.name, "reason": reason})

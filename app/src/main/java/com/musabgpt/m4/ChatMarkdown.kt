@@ -43,18 +43,10 @@ fun ChatMarkdown(source: String) {
                 }
             } else {
                 val line = rowLines.first()
+                if (line.isBlank()) { Spacer(Modifier.height(4.dp)); return@forEach }
                 val heading = Regex("^(#{1,6})\\s+(.*)").matchEntire(line)
                 val text = heading?.groupValues?.get(2) ?: if (line.startsWith("- ") || line.startsWith("* ")) "• " + line.drop(2) else line.removePrefix("> ")
-                val links = Regex("\\[([^]]+)\\]\\((https?://[^ )]+)\\)")
-                val annotated = buildAnnotatedString {
-                    var offset = 0
-                    links.findAll(text).forEach { link ->
-                        append(text.substring(offset, link.range.first))
-                        pushStringAnnotation("url", link.groupValues[2])
-                        withStyle(SpanStyle(color = Color(0xFFD97757))) { append(link.groupValues[1]) }
-                        pop(); offset = link.range.last + 1
-                    }; append(text.substring(offset))
-                }
+                val annotated = inlineMarkdown(text)
                 val uri = LocalUriHandler.current
                 SelectionContainer { ClickableText(annotated,
                     style = (if (heading != null) MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold) else MaterialTheme.typography.bodyLarge).copy(color = MaterialTheme.colorScheme.onSurface),
@@ -72,4 +64,23 @@ fun highlightedCode(code: String): AnnotatedString = buildAnnotatedString {
         val color = when { match.value.startsWith('#') || match.value.startsWith("//") -> Color(0xFF8D9F88); match.value.startsWith('"') || match.value.startsWith('\'') -> Color(0xFFC0A875); else -> Color(0xFFD97757) }
         withStyle(SpanStyle(color = color)) { append(match.value) }; offset = match.range.last + 1
     }; append(code.substring(offset))
+}
+
+fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+    val pattern = Regex("\\*\\*([^*]+)\\*\\*|`([^`]+)`|\\[([^]]+)\\]\\((https?://[^ )]+)\\)")
+    var offset = 0
+    pattern.findAll(text).forEach { match ->
+        append(text.substring(offset, match.range.first))
+        when {
+            match.groupValues[1].isNotEmpty() -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(match.groupValues[1]) }
+            match.groupValues[2].isNotEmpty() -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0xFF303030))) { append(match.groupValues[2]) }
+            else -> {
+                pushStringAnnotation("url", match.groupValues[4])
+                withStyle(SpanStyle(color = Color(0xFFAEC9FF))) { append(match.groupValues[3]) }
+                pop()
+            }
+        }
+        offset = match.range.last + 1
+    }
+    append(text.substring(offset))
 }

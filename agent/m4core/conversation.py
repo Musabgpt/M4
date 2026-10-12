@@ -23,6 +23,15 @@ exact schemas below. For an ordinary question or AFTER observed work, answer
 concisely in the user's language. Finish requests independent validation.
 Never report a successful action or test based on your own prose. Missing
 permissions, failed tools and unavailable features must be reported honestly.
+Preserve the requested format: HTML means an HTML artifact, never a Python CLI.
+For an HTML app requested in the browser, create the HTML artifact, call
+BrowserOpenArtifact with its actual returned id, then inspect/assert its DOM.
+For compound actions, finish every requested step. Opening a search URL is not
+opening a video. Use the owned Browser tools to observe search results, select
+an actual result, open it, and verify its page. On native apps, inspect PhoneScreen
+before choosing observed controls and verify the final state. If permissions,
+sign-in or a site challenge prevent a step, report the specific remaining step.
+Tool calls must use structured schemas, never narrated names with JSON examples.
 """
 
 
@@ -33,6 +42,28 @@ def action_expected(text):
     creation = re.search(r"(?:^|\s)(?:انشئ|اكتب|اكتبلي|اعمل|تعمل|اصنع|سوي|create|write|make)\b", normalized)
     target = re.search(r"ملف|برنامج|تطبيق|كود|صفحة|خادم|مهمة|مرفق|project|program|app\b|code|file|server|artifact|html|pdf|zip|python|json|\.py|\.sh", normalized)
     return bool(strong or creation and target)
+
+
+def missing_goal_evidence(goal, tools, artifacts):
+    text = goal.lower().replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+    html = bool(re.search(r"\bhtml\b|اتش تي ام ال|هتمل", text))
+    browser = bool(re.search(r"متصفح|browser|preview", text))
+    successful = [item for item in tools if item.get("ok")]
+    if html:
+        pages = [item for item in artifacts if str(item.get("display_name", "")).lower().endswith((".html", ".htm")) or item.get("mime") == "text/html"]
+        if not pages: return "المطلوب HTML؛ لم يُنشأ مرفق HTML بعد. استخدم ArtifactCreate بتنسيق html."
+        if browser and not any(item["name"] in {"BrowserOpenArtifact", "BrowserTestLab"} for item in successful):
+            return "ملف HTML موجود لكنه لم يُفتح في المتصفح. استخدم BrowserOpenArtifact بمعرّف المرفق الفعلي."
+        if browser and not any(item["name"] in {"BrowserReadDOM", "BrowserAssertVisible", "BrowserTestLab"} for item in successful):
+            return "لم يُتحقق من صفحة HTML بعد فتحها. افحص DOM أو تحقق من عنصر ظاهر."
+    video_search = bool(re.search(r"youtube|يوتيوب", text) and re.search(r"ابحث|بحث|search", text) and re.search(r"فيديو|video", text))
+    if video_search:
+        observed_watch = any(item["name"] == "BrowserReadDOM" and isinstance(item.get("result"), dict)
+            and re.search(r"(?:youtube\.com|youtu\.be)/watch\?", item["result"].get("url", "")) for item in successful)
+        native_verified = any(item["name"] in {"PhoneAssertVisible", "PhoneWaitFor"} for item in successful) and any(item["name"] == "PhoneTap" for item in successful)
+        if not observed_watch and not native_verified:
+            return "فتح البحث لا يكمل طلب الفيديو. اختر نتيجة فعلية ثم تحقق من صفحة الفيديو أو حالته في التطبيق."
+    return ""
 
 
 def request_messages(request):
@@ -139,6 +170,8 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
     repetitions = {}
     breaker, change = Breaker(), 0
     def proof_missing():
+        missing = missing_goal_evidence(goal, result["tools"], result["artifacts"])
+        if missing: return missing
         if file_expected and not result["artifacts"]: return "لم تُنشأ مرفقات حقيقية تثبت طلب الملف"
         if test_expected and not any(x['ok'] and x['name'] in {'PhoneTestLab','BrowserTestLab','Verify','Bash','run_command'} for x in result['tools']): return 'لم يُنفذ اختبار فعلي'
         if execution_expected and not any(x["ok"] and x["name"] in {"Bash", "run_command", "PhoneTestLab", "BrowserTestLab", "BrowserOpenArtifact", "Verify", "TerminalExec", "TermuxRun"} for x in result["tools"]): return "لم تُسجل نتيجة تشغيل أو اختبار فعلي"
@@ -169,7 +202,7 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
             dialog[0]["content"] = host.SYSTEM + "\n" + CHAT_CONTRACT + "\n" + runtime.environment() + "\nExact available schemas:\n" + json.dumps(runtime.registry.schemas, ensure_ascii=False)
             def on_event(kind, data):
                 host.log(db, kind, dict(data, turn_id=request["turn_id"]))
-            reply = host.ask(*host.endpoint(), dialog, allow_text=True, require_tools=needed and not successful_actions, on_event=on_event)
+            reply = host.ask(*host.endpoint(), dialog, allow_text=True, require_tools=needed and (not successful_actions or bool(proof_missing())), on_event=on_event)
             if reply.get("m4_usage"):
                 host.log(db, "usage", {"turn_id": request["turn_id"], "usage": reply["m4_usage"], "cost": None})
             if reply.get("m4_route"):
@@ -185,7 +218,7 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
                     plain_retries += 1
                     if plain_retries >= 2:
                         raise RuntimeError("لم ينفذ المزود أي أداة تحقق الطلب؛ لا يوجد دليل على إنشاء ملف أو تنفيذ الإجراء")
-                    dialog.append({"role": "user", "content": "The request requires real execution, not instructions. Call a registered tool now or return the precise missing capability. Windows/macOS commands are irrelevant on this Android device."})
+                    dialog.append({"role": "user", "content": "The request requires real execution, not instructions. Call a registered tool now. Remaining requirement: " + (proof_missing() or "No action has succeeded")})
                     continue
                 if not text:
                     raise RuntimeError("استجابة فارغة من المزود")
@@ -251,10 +284,16 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
                     finish = arguments.get("summary", "")
                 if breaker.open:
                     raise RuntimeError(breaker.reason)
+            if needed and proof_missing() and finish is None:
+                dialog.append({"role": "user", "content": "Remaining required work (not new permissions): " + proof_missing()})
             if finish is not None:
                 if runtime.mode == "plan_only":
                     result.update(status="planned" if not errors else "blocked", content=finish)
                 elif needed and (not successful_actions or proof_missing()):
+                    plain_retries += 1
+                    if plain_retries < 2 and step + 1 < max_steps:
+                        dialog.append({"role": "user", "content": "Finish rejected: " + (proof_missing() or "No successful action") + ". Complete the missing step with registered tools."})
+                        continue
                     result.update(status="blocked",
                                   content=finish if not errors else "لم يُنفذ الإجراء: " + str(result["tools"][-2]["result"] if len(result["tools"]) > 1 else result["tools"][-1]["result"]))
                     if proof_missing(): result["content"] = proof_missing()

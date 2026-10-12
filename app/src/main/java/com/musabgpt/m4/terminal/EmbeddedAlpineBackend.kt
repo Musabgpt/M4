@@ -213,7 +213,7 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
                         File(directory, "response.json").takeIf { it.isFile && it.length() in 1..1500000 }?.readText()
                     }
                     if (response != null) return@withTimeout JSONObject(response)
-                    if (!localFallbackAttempted && family != "freellmpool" && System.nanoTime() >= localFallbackAt) {
+                    if (!localFallbackAttempted && family != "freellmpool" && plainGreeting(request) && System.nanoTime() >= localFallbackAt) {
                         localFallbackAttempted = true
                         runCatching { current.write(session, "\u0003") }
                         val direct = runCatching { directGateway(request, family, turn, event) }.getOrNull()
@@ -229,6 +229,13 @@ class EmbeddedAlpineBackend(private val context: Context, private val scope: Cor
             current.write(session, "\u0003")
             throw e
         } finally { activeTurn = null; config.delete() }
+    }
+
+    private fun plainGreeting(request: JSONObject): Boolean {
+        if ((request.optJSONArray("attachments")?.length() ?: 0) > 0) return false
+        val messages = request.optJSONArray("messages") ?: return false
+        val text = messages.optJSONObject(messages.length() - 1)?.optString("content")?.trim()?.lowercase().orEmpty()
+        return text in setOf("مرحبا", "مرحباً", "مرحبا!", "اهلا", "أهلا", "السلام عليكم", "hi", "hello", "hello!", "hey")
     }
 
     /** Bounded Android-side rescue for a local gateway that PRoot cannot reach. */

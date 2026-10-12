@@ -204,7 +204,7 @@ fun ChatScreen(
             ModalDrawerSheet(drawerContainerColor = colors.background) {
                 Text(
                     "المحادثات",
-                    fontFamily = FontFamily.Serif,
+                    fontFamily = FontFamily.Default,
                     fontSize = 22.sp,
                     color = colors.onBackground,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp)
@@ -256,8 +256,10 @@ fun ChatScreen(
     ) {
         Scaffold(
             containerColor = colors.background,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 CenterAlignedTopAppBar(
+                    windowInsets = WindowInsets(0, 0, 0, 0),
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                         containerColor = colors.background
                     ),
@@ -325,21 +327,13 @@ fun ChatScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            activeRoute.ifBlank { "مزودات مجانية • لا مفاتيح يدوية" },
+                            activeRoute.ifBlank { "Agent" },
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        TextButton(
-                            onClick = { showAgentConfirm = true },
-                            enabled = input.isNotBlank() && !isStreaming
-                        ) {
-                            Icon(Icons.Filled.Code, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("تنفيذ كود")
-                        }
                         Box {
                             TextButton(onClick = { permissionsOpen = true }) {
                                 Text(when(permissionMode) { "plan_only" -> "تخطيط"; "ask_always" -> "اسأل دائمًا"; "accept_edits" -> "وافق على التشغيل"; else -> "تنفيذ المشروع" })
@@ -374,7 +368,7 @@ fun ChatScreen(
                 ) {
                     Text(
                         greeting(),
-                        fontFamily = FontFamily.Serif,
+                        fontFamily = FontFamily.Default,
                         fontSize = 34.sp,
                         color = colors.onBackground,
                         textAlign = TextAlign.Center
@@ -382,7 +376,7 @@ fun ChatScreen(
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "كيف أقدر أساعدك اليوم؟",
-                        fontFamily = FontFamily.Serif,
+                        fontFamily = FontFamily.Default,
                         fontSize = 20.sp,
                         color = colors.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -394,16 +388,23 @@ fun ChatScreen(
                     reverseLayout = true,
                     modifier = Modifier.padding(padding).fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(artifacts.reversed(), key = { "artifact-" + it.id }) { artifact -> ArtifactChatCard(artifact) }
-                    if (runtimeEvents.size >= 100) item { TextButton(onClick = loadOlderEvents) { Text("تحميل سجل أقدم") } }
-                    items(runtimeEvents.filter { it.kind in setOf("tool_started", "tool_finished", "turn_finished", "notice", "hook_error", "provider_fallback", "provider_route") }.groupBy { if (it.callId.isNotBlank()) "call-${it.turn}-${it.callId}" else "event-${it.id}" }.values.map { it.last() }.sortedByDescending { it.time }, key = { "event-" + it.id }) { event -> InteractiveToolCard(event) }
                     items(current.messages.reversed(), key = { it.id }) { msg ->
                         MessageRow(
                             msg = msg,
                             showActions = !(isStreaming && msg.id == lastId), vm = vm
                         )
+                        if (msg.role == "assistant") {
+                            val steps = runtimeEvents.filter { it.turn == msg.turnId && it.kind in setOf("tool_started", "tool_finished") }
+                                .groupBy { it.callId.ifBlank { it.id.toString() } }.values.map { it.last() }
+                            if (steps.isNotEmpty()) {
+                                var expanded by remember(msg.id) { mutableStateOf(false) }
+                                TextButton(onClick = { expanded = !expanded }) { Text("${if (expanded) "▾" else "▸"} ${steps.size} خطوات تنفيذ") }
+                                if (expanded) steps.forEach { InteractiveToolCard(it) }
+                            }
+                        }
                     }
                 }
             }
@@ -585,12 +586,11 @@ private fun InputBar(
     Column(
         Modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
-            .imePadding()
+
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Surface(
-            shape = RoundedCornerShape(26.dp),
+            shape = RoundedCornerShape(12.dp),
             color = colors.surface,
             border = BorderStroke(1.dp, colors.outline),
             modifier = Modifier.fillMaxWidth()
@@ -599,7 +599,7 @@ private fun InputBar(
                 Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
-                TextButton(onClick = onAttach, enabled = !isStreaming, contentPadding = PaddingValues(4.dp)) { Text("+", style = MaterialTheme.typography.titleLarge) }
+                IconButton(onClick = onAttach, enabled = !isStreaming, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Add, "Attach") }
                 BasicTextField(
                     value = text,
                     onValueChange = onTextChange,
@@ -608,7 +608,7 @@ private fun InputBar(
                     cursorBrush = SolidColor(Clay),
                     modifier = Modifier.weight(1f).padding(vertical = 7.dp).testTag("chat-input"),
                     decorationBox = { inner ->
-                        Box {
+                        Box(Modifier.fillMaxWidth()) {
                             if (text.isEmpty()) {
                                 Text("اكتب رسالتك...", fontSize = 16.sp, color = colors.onSurfaceVariant)
                             }

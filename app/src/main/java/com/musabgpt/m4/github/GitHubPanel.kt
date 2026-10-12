@@ -14,7 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@Composable fun GitHubPanel(owner: String) {
+@Composable fun GitHubPanel(owner: String, autoConnect: Boolean = false) {
     val context = LocalContext.current
     val client = remember { GitHubClient(context.applicationContext) }
     val scope = rememberCoroutineScope()
@@ -26,15 +26,8 @@ import kotlinx.coroutines.withContext
     var canceled by remember { mutableStateOf(false) }
     var artifactId by remember { mutableStateOf("") }
     var updateId by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("GitHub • M4 / NewAl", style = MaterialTheme.typography.titleLarge)
-        Text(status, style = MaterialTheme.typography.bodySmall)
-        if (!client.status().optBoolean("client_configured")) {
-            Text("يحتاج المطور client_id لتطبيق OAuth المخصص لـ M4. حساب Codex المتصل هنا لا يرسل اعتماده إلى الهاتف.")
-            OutlinedTextField(clientId, { clientId = it }, label = { Text("OAuth client_id (إعداد المطور)") })
-            TextButton(onClick = { try { client.setClientId(clientId.trim()); status = client.status().toString() } catch (e: Exception) { status = e.message.orEmpty() } }) { Text("حفظ إعداد التطبيق") }
-        }
-        Button(enabled = !busy && client.status().optBoolean("client_configured"), onClick = {
+    fun connect() {
+        if (busy || !client.status().optBoolean("client_configured")) return
             busy = true; canceled = false
             scope.launch {
                 try {
@@ -45,7 +38,17 @@ import kotlinx.coroutines.withContext
                 } catch (e: Exception) { status = e.message.orEmpty() }
                 finally { busy = false; code = "" }
             }
-        }) { Text("ربط الحساب عبر GitHub") }
+    }
+    LaunchedEffect(autoConnect) { if (autoConnect && !client.status().optBoolean("connected")) connect() }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("GitHub • M4 / NewAl", style = MaterialTheme.typography.titleLarge)
+        Text(status, style = MaterialTheme.typography.bodySmall)
+        if (!client.status().optBoolean("client_configured")) {
+            Text("يحتاج المطور client_id لتطبيق OAuth المخصص لـ M4. حساب Codex المتصل هنا لا يرسل اعتماده إلى الهاتف.")
+            OutlinedTextField(clientId, { clientId = it }, label = { Text("OAuth client_id (إعداد المطور)") })
+            TextButton(onClick = { try { client.setClientId(clientId.trim()); status = client.status().toString() } catch (e: Exception) { status = e.message.orEmpty() } }) { Text("حفظ إعداد التطبيق") }
+        }
+        Button(enabled = !busy && client.status().optBoolean("client_configured"), onClick = { connect() }) { Text("ربط الحساب عبر GitHub") }
         if (code.isNotBlank()) Text("رمز التفويض: $code", style = MaterialTheme.typography.headlineMedium)
         if (busy) TextButton(onClick = { canceled = true }) { Text("إلغاء التفويض") }
         OutlinedTextField(repository, { repository = it }, label = { Text("المستودع") })

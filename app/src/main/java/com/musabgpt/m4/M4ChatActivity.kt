@@ -86,6 +86,7 @@ class M4ChatActivity : ComponentActivity() {
                             "files" -> FilesPanel(editorState) { prompt -> vm.send(prompt); panel = "chat" }
                             "tasks" -> SchedulerPanel(owner)
                             "github" -> com.musabgpt.m4.github.GitHubPanel(owner)
+                            "github-connect" -> com.musabgpt.m4.github.GitHubPanel(owner, autoConnect = true)
                             "gitlab" -> com.musabgpt.m4.github.GitLabPanel(owner)
                             "tools" -> com.musabgpt.m4.runtime.ExtensionsPanel { panel = it }
                             "tool-settings" -> com.musabgpt.m4.runtime.ToolsPanel(vm, { panel = "chat" }, { panel = "termux" })
