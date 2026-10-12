@@ -18,7 +18,36 @@ import java.io.File
 class WorkbenchInstrumentedTest {
     @get:Rule val ui = createAndroidComposeRule<M4ChatActivity>()
 
+    private fun awaitWorkspace() {
+        ui.waitUntil(180000) {
+            var ready = false
+            ui.runOnIdle { ready = ViewModelProvider(ui.activity)[WorkspaceEditorState::class.java].ready }
+            ready
+        }
+    }
+
+    @Test fun initialExplorerBootstrapsWithoutSendingChatAndNavigationIsVisible() {
+        awaitWorkspace()
+        ui.onNodeWithTag("workspace-ready").assertIsDisplayed()
+        ui.onNodeWithTag("workbench-commands").assertIsDisplayed()
+        ui.onNodeWithTag("workbench-files").assertIsDisplayed()
+        ui.onNodeWithTag("workbench-chat").assertIsDisplayed()
+        ui.onNodeWithTag("workbench-tools").assertIsDisplayed()
+        val root = File(LinuxEnvironment.rootfs(ui.activity), "root/projects/M4")
+        assertTrue(File(root, ".git").isDirectory)
+        assertTrue(File(root, "agent/agent.py").isFile)
+        val screen = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+        val evidence = File(ui.activity.filesDir, "qa").apply { mkdirs() }
+        File(evidence, "workbench-first-open.png").outputStream().use { screen.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        screen.recycle()
+        ui.onNodeWithTag("workbench-chat").performClick()
+        ui.onNodeWithTag("chat-input").assertIsDisplayed()
+        ui.onNodeWithTag("workbench-tools").performClick()
+        ui.onNodeWithText("GitHub").assertIsDisplayed()
+    }
+
     @Test fun dirtyBufferSurvivesAgentNavigationAndOnlyReviewSaves() {
+        awaitWorkspace()
         val file = File(LinuxEnvironment.rootfs(ui.activity), "root/projects/M4/workbench-qa.txt")
         file.parentFile!!.mkdirs()
         file.writeText("before")

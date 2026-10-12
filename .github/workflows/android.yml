@@ -1,4 +1,4 @@
-name: بناء الطرفية العربية APK
+name: M4 Android Workbench APK
 on:
   push:
     branches: [main]
@@ -91,7 +91,7 @@ jobs:
       - name: إيداع APK قابل للتثبيت
         uses: actions/upload-artifact@v4
         with:
-          name: ArabicTerminal-debug-APK
+          name: M4-Workbench-debug-APK
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk.sha256

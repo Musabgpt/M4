@@ -17,7 +17,7 @@ sealed interface ChatEvent {
 }
 
 /** Bounded, keyless streaming router. Never sends API credentials and never follows redirects. */
-object ChatApi {
+open class ChatGateway {
     @Volatile private var connection: HttpURLConnection? = null
     @Volatile private var stopped = false
 
@@ -139,3 +139,6 @@ object ChatApi {
         throw IllegalStateException("تعذر الوصول إلى البوابات: " + lastError)
     }.flowOn(Dispatchers.IO)
 }
+
+/** Main chat session; inline editor requests use their own cancellable client. */
+object ChatApi : ChatGateway()

@@ -14,6 +14,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Code
 
 private val destinations = listOf(
     "files" to "Explorer", "chat" to "Agent", "github" to "GitHub",
@@ -38,33 +45,34 @@ fun WorkbenchShell(panel: String, open: (String) -> Unit, content: @Composable (
     var commands by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-        Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.statusBarsPadding().navigationBarsPadding().imePadding()) {
-                Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("M4", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(8.dp))
-                    OutlinedButton(onClick = { commands = true }, modifier = Modifier.weight(1f)) {
-                        Text("⌕  M4 / Search commands", fontSize = 12.sp, maxLines = 1)
+        Scaffold(
+            modifier = Modifier.fillMaxSize().testTag("workbench-shell"),
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                    Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 56.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Code, "M4", tint = MaterialTheme.colorScheme.primary)
+                        Text("  M4 / " + (destinations.firstOrNull { it.first == panel }?.second ?: "Workspace"), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                        IconButton(onClick = { commands = true }, modifier = Modifier.testTag("workbench-commands")) { Icon(Icons.Default.Search, "Search commands") }
                     }
-                    TextButton(onClick = { open("chat") }) { Text("Agent") }
                 }
-                HorizontalDivider()
-                Row(Modifier.weight(1f)) {
-                    Column(Modifier.width(76.dp).fillMaxHeight().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-                        destinations.filter { it.first !in setOf("termux", "gitlab", "tasks") }.forEach { (key, label) ->
-                            TextButton(onClick = { open(key) }, contentPadding = PaddingValues(4.dp), modifier = Modifier.fillMaxWidth().height(56.dp).testTag("workbench-$key"), colors = ButtonDefaults.textButtonColors(contentColor = if (panel == key) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)) {
-                                Text(label, fontSize = 11.sp, maxLines = 1)
-                            }
-                        }
+            },
+            bottomBar = {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    listOf(
+                        Triple("files", "Files", Icons.Default.Folder),
+                        Triple("chat", "Agent", Icons.Default.Chat),
+                        Triple("terminal", "Terminal", Icons.Default.Terminal),
+                        Triple("tools", "Extensions", Icons.Default.Extension)
+                    ).forEach { (key, label, icon) ->
+                        NavigationBarItem(selected = panel == key, onClick = { open(key) },
+                            modifier = Modifier.testTag("workbench-$key"),
+                            icon = { Icon(icon, label) }, label = { Text(label, fontSize = 11.sp) })
                     }
-                    VerticalDivider()
-                    Box(Modifier.weight(1f).fillMaxHeight()) { content() }
-                }
-                HorizontalDivider()
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("M4 workspace", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    destinations.filter { it.first in setOf("gitlab", "tasks", "termux") }.forEach { (key, label) -> TextButton(onClick = { open(key) }) { Text(label, fontSize = 10.sp) } }
                 }
             }
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding).imePadding()) { content() }
         }
         if (commands) AlertDialog(onDismissRequest = { commands = false }, title = { Text("Go to…") }, text = {
             Column {

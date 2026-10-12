@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.musabgpt.m4.artifacts.ArtifactRepository
 import io.musab.arabicterminal.LinuxEnvironment
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -31,12 +32,37 @@ class EditorDocument(val file: File, initial: String, initialHash: String) {
 class WorkspaceEditorState : androidx.lifecycle.ViewModel() {
     val documents = mutableStateListOf<EditorDocument>()
     var active by mutableStateOf<EditorDocument?>(null)
+    var ready by mutableStateOf(false)
+        private set
+    var preparing by mutableStateOf(false)
+        private set
+    var setupError by mutableStateOf<String?>(null)
+        private set
+    fun prepare(context: android.content.Context) {
+        if (ready || preparing) return
+        preparing = true
+        setupError = null
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    LinuxEnvironment.install(context.applicationContext)
+                    io.musab.arabicterminal.ProjectBootstrap.ensure(LinuxEnvironment.rootfs(context))
+                }
+                ready = true
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) { setupError = failure.message ?: "Workspace setup failed" }
+            finally { preparing = false }
+        }
+    }
 }
 
 /** Bounded project editor with a content-hash conflict check and private backups. */
 @Composable
 fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compose.viewModel(), askAgent: (String) -> Unit = {}) {
     val context = LocalContext.current
+    val chatVm: com.musabgpt.m4.ChatViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val providerIndex by chatVm.providerIndex.collectAsState()
+    val providers by chatVm.providers.collectAsState()
     val scope = rememberCoroutineScope()
     val root = remember { File(LinuxEnvironment.rootfs(context), "root/projects/M4") }
     var directory by remember { mutableStateOf(root) }
@@ -51,16 +77,35 @@ fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compos
     var filter by remember { mutableStateOf("") }
     var ask by remember { mutableStateOf(false) }
     var instruction by remember { mutableStateOf("") }
+    var inlineEdit by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
+    var filename by remember { mutableStateOf("") }
+    var revision by remember { mutableStateOf(0) }
     fun allowed(file: File): Boolean {
         val canonical = file.canonicalFile
         return canonical.toPath().startsWith(root.canonicalFile.toPath()) &&
             canonical.name !in setOf(".git", ".term-agent", ".env", ".ssh", ".aws") &&
             !canonical.name.endsWith(".pem") && !canonical.name.endsWith(".key")
     }
-    LaunchedEffect(directory) {
+    LaunchedEffect(Unit) { state.prepare(context) }
+    if (!state.ready) {
+        Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+            Text("M4 Workspace", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(16.dp))
+            if (state.setupError == null) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text("جارٍ تجهيز ملفات المشروع وأدواته لأول تشغيل…")
+            } else {
+                Text(state.setupError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                Button(onClick = { state.prepare(context) }) { Text("إعادة المحاولة") }
+            }
+        }
+        return
+    }
+    LaunchedEffect(directory, state.ready, revision) {
         entries = withContext(Dispatchers.IO) { directory.listFiles().orEmpty().filter { allowed(it) }.sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name }).take(250) }
     }
-    Column(Modifier.fillMaxSize().padding(12.dp)) {
+    Column(Modifier.fillMaxSize().padding(12.dp).testTag("workspace-ready")) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             TextButton(onClick = { state.active = null }) { Text("Explorer") }
             state.documents.forEach { tab ->
@@ -73,7 +118,8 @@ fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compos
         if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
         if (selected == null) {
             if (directory != root) TextButton(onClick = { directory = directory.parentFile ?: root }) { Text("المجلد الأعلى") }
-            if (!root.exists()) Text("شغّل أول مهمة للوكيل لإنشاء نسخة المشروع المدمجة")
+
+            TextButton(onClick = { creating = true }) { Text("New file") }
             OutlinedTextField(filter, { filter = it }, singleLine = true, placeholder = { Text("Filter files") }, modifier = Modifier.fillMaxWidth())
             LazyColumn {
                 items(entries.filter { it.name.contains(filter, true) }, key = { it.absolutePath }) { file ->
@@ -95,10 +141,11 @@ fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compos
                 }
             }
         } else {
-            Row {
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
                 TextButton(onClick = { state.active = null }) { Text("رجوع") }
                 TextButton(onClick = { diff = true }, enabled = original != content) { Text("Review") }
                 TextButton(onClick = { ask = true }) { Text("Ask Agent") }
+                TextButton(onClick = { inlineEdit = true }) { Text("Edit with AI") }
             }
             Row(Modifier.weight(1f).verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState())) {
                 Text((1..(content.count { it == '\n' } + 1)).joinToString("\n"),
@@ -106,6 +153,7 @@ fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compos
                     style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, lineHeight = 22.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(content, { document?.content = it },
+                    visualTransformation = CodeHighlight,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, lineHeight = 22.sp),
                     modifier = Modifier.testTag("code-editor").width(maxOf(700, (content.lineSequence().maxOfOrNull { it.length } ?: 0).coerceAtMost(500) * 9).dp),
                     placeholder = { Text("Write code…") })
@@ -116,6 +164,23 @@ fun FilesPanel(state: WorkspaceEditorState = androidx.lifecycle.viewmodel.compos
             }
         }
     }
+    if (inlineEdit && document != null) InlineEditDialog(document, providers[providerIndex.coerceIn(providers.indices)]) { inlineEdit = false }
+    if (creating) AlertDialog(onDismissRequest = { creating = false }, title = { Text("New file") },
+        text = { OutlinedTextField(filename, { filename = it }, singleLine = true, label = { Text("Filename") }) },
+        confirmButton = { TextButton(enabled = filename.isNotBlank(), onClick = { scope.launch {
+            try {
+                val target = withContext(Dispatchers.IO) {
+                    require(filename !in setOf(".", "..") && !filename.contains('/') && !filename.contains('\\')) { "استخدم اسم ملف فقط" }
+                    val file = File(directory, filename)
+                    require(allowed(file)) { "المسار غير مسموح" }
+                    require(file.createNewFile()) { "الملف موجود بالفعل" }
+                    file
+                }
+                val opened = EditorDocument(target, "", withContext(Dispatchers.IO) { ArtifactRepository.hash(target) })
+                state.documents.add(opened); state.active = opened
+                revision++; creating = false; filename = ""; error = ""
+            } catch (failure: Exception) { error = failure.message.orEmpty(); creating = false }
+        } }) { Text("Create") } }, dismissButton = { TextButton(onClick = { creating = false }) { Text("Cancel") } })
     if (ask) AlertDialog(onDismissRequest = { ask = false }, title = { Text("Ask about ${selected?.name.orEmpty()}") },
         text = { OutlinedTextField(instruction, { instruction = it }, label = { Text("Instruction") }) },
         confirmButton = { TextButton(enabled = instruction.isNotBlank(), onClick = {

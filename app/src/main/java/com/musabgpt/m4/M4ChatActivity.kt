@@ -39,6 +39,7 @@ class M4ChatActivity : ComponentActivity() {
                 val vm: ChatViewModel = viewModel()
                 val terminal = vm.terminal
                 val editorState: com.musabgpt.m4.runtime.WorkspaceEditorState = viewModel()
+                LaunchedEffect(Unit) { editorState.prepare(applicationContext) }
                 val permissionRequest by com.musabgpt.m4.runtime.HostPermissionRequest.pending.collectAsState()
                 val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted -> com.musabgpt.m4.runtime.HostPermissionRequest.resolve(granted) }
                 LaunchedEffect(permissionRequest) { permissionRequest?.let { permissionLauncher.launch(it) } }
@@ -73,8 +74,8 @@ class M4ChatActivity : ComponentActivity() {
                 }
                 com.musabgpt.m4.runtime.WorkbenchShell(panel, { panel = it }) {
                     Box(Modifier.fillMaxSize()) {
-                        BrowserPanel(browser)
-                        if (panel != "browser") Surface(Modifier.fillMaxSize()) { when (panel) {
+                        Surface(Modifier.fillMaxSize()) { when (panel) {
+                        "browser" -> BrowserPanel(browser)
                         "cursor" -> com.musabgpt.m4.runtime.FilesPanel(editorState) { prompt -> vm.send(prompt); panel = "chat" }
                         "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
                                 runAgent = { goal -> vm.send(goal) },
