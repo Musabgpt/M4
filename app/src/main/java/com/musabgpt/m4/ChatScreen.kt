@@ -459,7 +459,7 @@ private fun MessageActions(msg: UiMessage, vm: ChatViewModel) {
     var edited by remember(msg.id) { mutableStateOf(msg.content) }
     var rewind by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
-    Row(Modifier.horizontalScroll(rememberScrollState())) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
         CopyAction(msg.content)
         Box {
             TextButton(onClick = { menu = true }) { Text("خيارات") }
@@ -610,7 +610,7 @@ private fun InputBar(
                     decorationBox = { inner ->
                         Box(Modifier.fillMaxWidth()) {
                             if (text.isEmpty()) {
-                                Text("اكتب رسالتك...", fontSize = 16.sp, color = colors.onSurfaceVariant)
+                                Text("اسأل أو اطلب تعديلًا…", modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, color = colors.onSurfaceVariant)
                             }
                             inner()
                         }
@@ -634,13 +634,7 @@ private fun InputBar(
                 }
             }
         }
-        Text(
-            "قد يخطئ الذكاء الاصطناعي. راجع الإجابات المهمة.",
-            fontSize = 11.sp,
-            color = colors.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
-        )
+
     }
 }
 
