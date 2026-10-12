@@ -1,5 +1,8 @@
 package com.musabgpt.m4
 
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.platform.app.InstrumentationRegistry
@@ -50,8 +53,27 @@ class DeveloperHostInstrumentedTest {
                 assertEquals(200, editor.responseCode)
                 assertTrue(editor.inputStream.bufferedReader().use { it.readText().contains("workbench") })
             } finally { editor.disconnect() }
+            activity.onNodeWithTag("workbench-tools").performClick()
+            activity.onNodeWithText("تثبيت وفتح").performClick()
+            val rendered = java.util.concurrent.atomic.AtomicBoolean(false)
+            fun findBrowser(view: android.view.View): android.webkit.WebView? {
+                if (view is android.webkit.WebView) return view
+                if (view is android.view.ViewGroup) for (i in 0 until view.childCount) {
+                    findBrowser(view.getChildAt(i))?.let { return it }
+                }
+                return null
+            }
+            activity.waitUntil(120000) {
+                activity.activity.runOnUiThread {
+                    findBrowser(activity.activity.window.decorView)?.evaluateJavascript(
+                        "document.querySelector('.monaco-workbench') !== null"
+                    ) { rendered.set(it == "true") }
+                }
+                rendered.get()
+            }
+            assertTrue("Authenticated editor must render inside the Android WebView", rendered.get())
             File(activity.activity.filesDir, "qa").apply { mkdirs() }.resolve("developer-host.txt")
-                .writeText("Actual Android PRoot install and authenticated Code-OSS HTTP workbench passed.\nExtension activation and language-server responses are separate checks.\n")
+                .writeText("Actual Android PRoot install, authenticated HTTP and Android WebView workbench rendering passed.\nExtension activation and language-server responses are separate checks.\n")
         } finally { activity.runOnIdle { host.stop() } }
     }
 }

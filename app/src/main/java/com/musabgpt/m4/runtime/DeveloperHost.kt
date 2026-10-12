@@ -37,7 +37,7 @@ class DeveloperHost : ViewModel() {
                     val script = File(LinuxEnvironment.rootfs(app), "root/.m4/developer-host-install.sh")
                     script.parentFile!!.mkdirs()
                     app.assets.open("developer-host-install.sh").use { input -> script.outputStream().use { input.copyTo(it) } }
-                    val installer = launchProcess(app, listOf("/bin/sh", "/root/.m4/developer-host-install.sh"))
+                    val installer = launchProcess(app, listOf("/bin/bash", "/root/.m4/developer-host-install.sh"))
                     process = installer
                     drain(installer)
                     val deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(30)
@@ -114,7 +114,9 @@ class DeveloperHost : ViewModel() {
                 put("PROOT_LOADER", "$libs/libproot-loader.so"); put("PROOT_NO_SECCOMP", "1")
                 put("PROOT_TMP_DIR", context.cacheDir.absolutePath); put("LD_LIBRARY_PATH", libs)
                 put("HOME", "/root"); put("LANG", "C.UTF-8")
-                put("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+                put("SHELL", "/bin/bash")
+                put("npm_config_script_shell", "/bin/bash")
+                put("PATH", "/root/.local/share/m4-code/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
                 if (secret != null) put("PASSWORD", secret)
             }
         }.start()

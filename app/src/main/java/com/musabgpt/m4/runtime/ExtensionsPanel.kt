@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.dp
 
 private data class Integration(val name: String, val description: String, val destination: String)
 private val integrations = listOf(
-    Integration("Code-OSS", "Install an editor with Open VSX extensions and language servers", "developer-host"),
+    Integration("Code-OSS", "Code-OSS editor, Open VSX and language servers • large optional download", "developer-host"),
     Integration("GitHub", "Repositories, issues, pull requests and Actions", "github"),
     Integration("GitLab", "Projects, merge requests and pipelines", "gitlab"),
     Integration("Termux", "Optional external command runner", "termux"),
