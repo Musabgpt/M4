@@ -40,6 +40,10 @@ class WorkbenchInstrumentedTest {
         val evidence = File(ui.activity.filesDir, "qa").apply { mkdirs() }
         File(evidence, "workbench-first-open.png").outputStream().use { screen.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         screen.recycle()
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("screencap -p /data/local/tmp/m4-workbench-first-open.png").use { descriptor ->
+                java.io.FileInputStream(descriptor.fileDescriptor).use { it.readBytes() }
+            }
         ui.onNodeWithTag("workbench-chat").performClick()
         ui.onNodeWithTag("chat-input").assertIsDisplayed()
         ui.onNodeWithTag("workbench-tools").performClick()
