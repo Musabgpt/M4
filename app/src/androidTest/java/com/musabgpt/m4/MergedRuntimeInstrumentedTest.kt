@@ -91,7 +91,7 @@ class MergedRuntimeInstrumentedTest {
     }
 
     @Test fun htmlCalculatorOpensAndComputesInsideOwnedBrowser() {
-        val html = """<!doctype html><html><h1>Calculator</h1><input id="a" type="number"><input id="b" type="number"><button id="add" onclick="document.querySelector('#result').textContent=Number(document.querySelector('#a').value)+Number(document.querySelector('#b').value)">+</button><output id="result"></output></html>"""
+        val html = """<!doctype html><html><h1>Calculator</h1><input id="a" type="number"><input id="b" type="number"><button id="add" onclick="document.querySelector('#result').textContent=Number(document.querySelector('#a').value)+Number(document.querySelector('#b').value)">+</button><output id="result"></output><a href="https://example.com/watch?v=fixture">نتيجة مرئية</a></html>"""
         val row = ArtifactRepository.saveText(context, owner, "calculator.html", html)
         val browser = BrowserController.current ?: error("Owned WebView unavailable")
         assertEquals("loaded", browser.call("open_artifact", JSONObject().put("id", row.id), owner).getString("status"))
@@ -100,6 +100,8 @@ class MergedRuntimeInstrumentedTest {
         browser.call("click", JSONObject().put("selector", "#add"), owner)
         val observed = browser.call("wait_for", JSONObject().put("selector", "#result").put("text", "12"), owner)
         assertEquals("verified", observed.getString("status"))
+        val dom = browser.call("read_dom", JSONObject(), owner)
+        assertEquals("https://example.com/watch?v=fixture", dom.getJSONArray("links").getJSONObject(0).getString("href"))
         evidence("calculator-browser.json", observed.toString(2))
     }
 

@@ -81,7 +81,7 @@ class BrowserController(private val context: Context) {
             return try { next.get(args.optInt("timeout", 25).coerceIn(1, 30).toLong(), TimeUnit.SECONDS) } catch (_: Exception) { JSONObject().put("status", "timed_out").put("error", "لم يكتمل التحميل") } finally { if (loading === next) loading = null }
         }
         if (action in setOf("console", "network")) return synchronized(lock) { JSONObject().put("status", "observed").put("events", JSONArray((if (action == "console") console else network).toList())) }
-        if (action == "read_dom") return json("return {status:'observed',url:location.href,title:document.title,text:(document.body?.innerText||'').slice(0,12000),elements:Array.from(document.querySelectorAll('button,input,a,select,textarea')).slice(0,100).map(e=>({tag:e.tagName,id:e.id,text:e.innerText?.slice(0,200),type:e.type,password:e.type==='password'}))};")
+        if (action == "read_dom") return json("return {status:'observed',url:location.href,title:document.title,text:(document.body?.innerText||'').slice(0,12000),links:Array.from(document.querySelectorAll('a[href]')).slice(0,100).map(e=>({text:(e.innerText||e.getAttribute('aria-label')||'').slice(0,200),href:e.href})),elements:Array.from(document.querySelectorAll('button,input,a,select,textarea')).slice(0,100).map(e=>({tag:e.tagName,id:e.id,text:e.innerText?.slice(0,200),type:e.type,password:e.type==='password'}))};")
         if (action in setOf("wait_for", "assert_visible")) {
             val selector = JSONObject.quote(args.getString("selector")); val text = JSONObject.quote(args.optString("text", ""))
             val end = System.nanoTime() + (if (action == "assert_visible") 0 else args.optInt("timeout", 8).coerceIn(0, 30)) * 1_000_000_000L
