@@ -78,6 +78,14 @@ class MergedRuntimeInstrumentedTest {
             evidence("first-message.json", JSONObject().put("reply", reply).put("runtime", vm.terminal.state.value.status).put("model_request_received", received.get() != null).toString(2))
             assertEquals("مرحباً، المحادثة جاهزة.", reply)
             assertTrue(received.get().contains("مرحبا"))
+            activity.runOnIdle {
+                val keyboard = activity.activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                keyboard.hideSoftInputFromWindow(activity.activity.window.decorView.windowToken, 0)
+            }
+            activity.waitForIdle()
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("screencap -p /data/local/tmp/m4-agent-conversation.png")
+            ).use { it.readBytes() }
             assertTrue(File(LinuxEnvironment.rootfs(context), "root/projects/M4/.git").isDirectory)
         } finally { server.close(); fixture.join(1000) }
     }

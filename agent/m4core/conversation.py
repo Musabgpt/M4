@@ -201,6 +201,7 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
             host.TOOLS = runtime.registry.schemas
             dialog[0]["content"] = host.SYSTEM + "\n" + CHAT_CONTRACT + "\n" + runtime.environment() + "\nExact available schemas:\n" + json.dumps(runtime.registry.schemas, ensure_ascii=False)
             def on_event(kind, data):
+                if kind == "token" and needed: return  # Show observed tool progress, not unvalidated action narration.
                 host.log(db, kind, dict(data, turn_id=request["turn_id"]))
             reply = host.ask(*host.endpoint(), dialog, allow_text=True, require_tools=needed and (not successful_actions or bool(proof_missing())), on_event=on_event)
             if reply.get("m4_usage"):

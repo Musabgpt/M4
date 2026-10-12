@@ -67,7 +67,7 @@ file buffer, including unsaved edits, with the user's instruction.
 This is an Android workbench implementation, not feature parity with Cursor.
 The editor now provides lexical syntax highlighting, local identifier suggestions,
 find, undo/redo and AI whole-file edit proposals with explicit accept/reject. It does
-not yet provide a language server, cursor-level AI completions or a VS Code extension host. Integration cards open the actual
+not yet provide a language server, automatic ghost-text completions or a VS Code extension host. Integration cards open the actual
 native connectors; they do not install arbitrary desktop extensions. Termux is
 optional and its installation still uses Android's normal installation flow.
 
@@ -85,3 +85,20 @@ the selected free gateway. AI proposals are limited to 12,000-character source
 files, reviewed before accepting into the buffer, and saved separately through
 the existing hash check and backup flow. Generation errors never replace a file.
 Gateway availability remains dependent on the selected upstream service.
+
+
+### Conversation and action verification
+
+Agent chat groups observed tool steps under each reply and hides provider-routing
+internals. Markdown renders bold and inline code. Action requests no longer stream
+unvalidated tool-call narration as if it were a completed response. Narrated tool
+calls are repaired and schema-validated before any execution.
+
+HTML/browser requests require an HTML attachment, an observed browser open and a
+DOM observation; a Python attachment is insufficient. YouTube search-and-open
+requests cannot finish on URL dispatch alone. These checks prevent false success;
+they do not bypass site challenges, account access or Android permissions.
+
+AI Complete explicitly proposes an insertion at the editor selection, preserving
+surrounding source and requiring acceptance. It is not automatic ghost text.
+Language-server integration and a VS Code extension host remain unimplemented.
