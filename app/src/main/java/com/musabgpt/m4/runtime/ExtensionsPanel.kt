@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 
 private data class Integration(val name: String, val description: String, val destination: String)
 private val integrations = listOf(
+    Integration("Code-OSS", "Install an editor with Open VSX extensions and language servers", "developer-host"),
     Integration("GitHub", "Repositories, issues, pull requests and Actions", "github"),
     Integration("GitLab", "Projects, merge requests and pipelines", "gitlab"),
     Integration("Termux", "Optional external command runner", "termux"),
@@ -48,6 +49,7 @@ fun ExtensionsPanel(open: (String) -> Unit) {
                         val missingTermux = integration.destination == "termux" && !termuxInstalled
                         val connectGithub = integration.destination == "github" && !github.optBoolean("connected")
                         Text(when {
+                            integration.destination == "developer-host" -> "محرك اختياري"
                             missingTermux -> "غير مثبت"
                             integration.destination == "github" -> if (github.optBoolean("connected")) "متصل: ${github.optString("login")}" else "جاهز للربط"
                             else -> "مدمج"
@@ -57,7 +59,7 @@ fun ExtensionsPanel(open: (String) -> Unit) {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/com.termux/")))
                             }.onFailure { error = it.message.orEmpty() }
                             else open(if (connectGithub) "github-connect" else integration.destination)
-                        }) { Text(when { missingTermux -> "تثبيت"; connectGithub -> "ربط الحساب"; else -> "فتح" }) }
+                        }) { Text(when { integration.destination == "developer-host" -> "إعداد المحرر"; missingTermux -> "تثبيت"; connectGithub -> "ربط الحساب"; else -> "فتح" }) }
 
                     }
                 }

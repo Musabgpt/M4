@@ -23,6 +23,9 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.graphics.asAndroidBitmap
 import android.util.Log
 
 @RunWith(AndroidJUnit4::class)
@@ -83,6 +86,12 @@ class MergedRuntimeInstrumentedTest {
                 keyboard.hideSoftInputFromWindow(activity.activity.window.decorView.windowToken, 0)
             }
             activity.waitForIdle()
+            // Preserve the application surface separately from the full-device image:
+            // unrelated emulator/system dialogs remain visible in the latter.
+            val chatBitmap = activity.onRoot().captureToImage().asAndroidBitmap()
+            File(context.filesDir, "qa/agent-app-surface.png").outputStream().use {
+                chatBitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
             android.os.ParcelFileDescriptor.AutoCloseInputStream(
                 InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("screencap -p /data/local/tmp/m4-agent-conversation.png")
             ).use { it.readBytes() }

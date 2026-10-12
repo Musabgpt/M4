@@ -25,7 +25,7 @@ import androidx.compose.material.icons.filled.Code
 private val destinations = listOf(
     "files" to "Explorer", "chat" to "Agent", "github" to "GitHub",
     "gitlab" to "GitLab", "terminal" to "Terminal", "tools" to "Extensions",
-    "browser" to "Preview", "tasks" to "Tasks", "termux" to "Termux"
+    "developer-host" to "Code-OSS", "browser" to "Preview", "tasks" to "Tasks", "termux" to "Termux"
 )
 
 @Composable
