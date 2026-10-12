@@ -583,59 +583,23 @@ private fun InputBar(
     val colors = MaterialTheme.colorScheme
     val canSend = isStreaming || text.isNotBlank()
 
-    Column(
-        Modifier
-            .fillMaxWidth()
-
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = colors.surface,
-            border = BorderStroke(1.dp, colors.outline),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.Bottom
-            ) {
-                IconButton(onClick = onAttach, enabled = !isStreaming, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Add, "Attach") }
-                BasicTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    maxLines = 6,
-                    textStyle = TextStyle(color = colors.onSurface, fontSize = 16.sp, lineHeight = 22.sp),
-                    cursorBrush = SolidColor(Clay),
-                    modifier = Modifier.weight(1f).padding(vertical = 7.dp).testTag("chat-input"),
-                    decorationBox = { inner ->
-                        Box(Modifier.fillMaxWidth()) {
-                            if (text.isEmpty()) {
-                                Text("اسأل أو اطلب تعديلًا…", modifier = Modifier.fillMaxWidth(), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, color = colors.onSurfaceVariant)
-                            }
-                            inner()
-                        }
-                    }
-                )
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(if (canSend) Clay else Clay.copy(alpha = 0.35f))
-                        .testTag("chat-send")
-                        .clickable(enabled = canSend) { if (isStreaming) onStop() else onSend() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isStreaming) {
-                        Box(Modifier.size(12.dp).background(Color.White, RoundedCornerShape(3.dp)))
-                    } else {
-                        Text("↑", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
+    OutlinedTextField(
+        value = text,
+        onValueChange = onTextChange,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("chat-input"),
+        shape = RoundedCornerShape(12.dp),
+        maxLines = 6,
+        textStyle = TextStyle(color = colors.onSurface, fontSize = 16.sp, lineHeight = 22.sp),
+        placeholder = { Text("اسأل أو اطلب تعديلًا…", maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp) },
+        leadingIcon = { IconButton(onClick = onAttach, enabled = !isStreaming) { Icon(Icons.Filled.Add, "Attach") } },
+        trailingIcon = {
+            IconButton(onClick = { if (isStreaming) onStop() else onSend() }, enabled = canSend, modifier = Modifier.testTag("chat-send")) {
+                if (isStreaming) Box(Modifier.size(12.dp).background(colors.primary, RoundedCornerShape(3.dp)))
+                else Text("↑", color = if (canSend) colors.primary else colors.onSurfaceVariant, fontSize = 24.sp)
             }
         }
+    )
 
-    }
 }
 
 private sealed interface Block {
