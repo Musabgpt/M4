@@ -82,6 +82,19 @@ class MergedRuntimeInstrumentedTest {
         } finally { server.close(); fixture.join(1000) }
     }
 
+    @Test fun htmlCalculatorOpensAndComputesInsideOwnedBrowser() {
+        val html = """<!doctype html><html><h1>Calculator</h1><input id="a" type="number"><input id="b" type="number"><button id="add" onclick="document.querySelector('#result').textContent=Number(document.querySelector('#a').value)+Number(document.querySelector('#b').value)">+</button><output id="result"></output></html>"""
+        val row = ArtifactRepository.saveText(context, owner, "calculator.html", html)
+        val browser = BrowserController.current ?: error("Owned WebView unavailable")
+        assertEquals("loaded", browser.call("open_artifact", JSONObject().put("id", row.id), owner).getString("status"))
+        browser.call("type", JSONObject().put("selector", "#a").put("text", "7"), owner)
+        browser.call("type", JSONObject().put("selector", "#b").put("text", "5"), owner)
+        browser.call("click", JSONObject().put("selector", "#add"), owner)
+        val observed = browser.call("wait_for", JSONObject().put("selector", "#result").put("text", "12"), owner)
+        assertEquals("verified", observed.getString("status"))
+        evidence("calculator-browser.json", observed.toString(2))
+    }
+
     @Test fun ownedHtmlIsClickedTypedAssertedAndCaptured() {
         val html = """<!doctype html><html lang="ar" dir="rtl"><style>body{background:white;color:black;font-size:24px}button,input{font-size:24px}</style><h1>اختبار M4</h1><input id="name"><button id="go" onclick="document.querySelector('#result').innerText='مرحبا '+document.querySelector('#name').value">تشغيل</button><p id="result">انتظار</p></html>"""
         val row = ArtifactRepository.saveText(context, owner, "qa.html", html)

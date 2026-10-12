@@ -35,4 +35,9 @@ class InlineEditResponseTest {
         doc.find("private")
         assertEquals(androidx.compose.ui.text.TextRange(0, 7), doc.value.selection)
     }
+    @Test fun chatMarkdownRendersBoldAndInlineCodeWithoutMarkers() {
+        val value = inlineMarkdown("Created **calculator.html** with `HTML`.")
+        assertEquals("Created calculator.html with HTML.", value.text)
+        assertEquals(2, value.spanStyles.size)
+    }
 }

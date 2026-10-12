@@ -76,6 +76,13 @@ class NormalChatRuntimeTests(unittest.TestCase):
         self.assertEqual(result["artifacts"], [])
         self.assertNotIn("PowerShell", result["content"])
 
+    def test_python_artifact_cannot_complete_html_browser_request(self):
+        result = self.run_turn([{"role": "user", "content": "اعمل حاسبة HTML وافتحها بالمتصفح"}],
+            [call("ArtifactCreate", {"format": "py", "name": "calculator.py", "content": "print(2+2)"}),
+             call("Finish", {"summary": "جاهز"}), call("Finish", {"summary": "جاهز"})])
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("HTML", result["content"])
+
     def test_ordinary_question_can_answer_without_invoking_tools(self):
         result = self.run_turn([{"role": "user", "content": "ما معنى العدد الأولي؟"}],
             [{"role": "assistant", "content": "عدد أكبر من واحد لا يقبل القسمة إلا على نفسه وواحد."}])
