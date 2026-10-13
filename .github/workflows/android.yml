@@ -1,4 +1,4 @@
-name: بناء الطرفية العربية APK
+name: M4 Android Workbench APK
 on:
   push:
     branches: [main]
@@ -26,6 +26,8 @@ jobs:
           "$SDKMANAGER" 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1'
       - name: اختبار وكيل البرمجة والاستمرارية والأمان
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ripgrep
           python3 -m unittest discover -s agent_tests -v
           python3 -m py_compile agent/agent.py agent/provider_routes.py agent/newal/continuity.py agent/newal/task_state.py
           bash -n agent/term-agent.sh agent/term-agent-watch.sh agent/m4-agent-start.sh
@@ -89,7 +91,7 @@ jobs:
       - name: إيداع APK قابل للتثبيت
         uses: actions/upload-artifact@v4
         with:
-          name: ArabicTerminal-debug-APK
+          name: M4-Workbench-debug-APK
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk.sha256

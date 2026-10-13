@@ -53,6 +53,27 @@ class GatewayPromptTests(unittest.TestCase):
         self.assertEqual(len(seen),2)
         self.assertTrue(reply["tool_calls"])
 
+    def test_narrated_tool_call_is_repaired_not_returned_as_an_answer(self):
+        from unittest.mock import patch
+        spec=importlib.util.spec_from_file_location("m4_agent_repair",HERE/"agent.py")
+        m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        seen=[]
+        class Response:
+            headers = {}
+            def __enter__(self): return self
+            def __exit__(self,*args): return False
+        def fake_open(request,timeout=0):
+            seen.append(request.full_url)
+            return Response()
+        replies = [
+            {"choices":[{"message":{"content":"استدعاء أداة list_files بمعاملات {}"}}]},
+            {"choices":[{"message":{"tool_calls":[{"id":"x","type":"function","function":{"name":"list_files","arguments":"{}"}}]}}]}
+        ]
+        with patch.object(m.urllib.request,"urlopen",side_effect=fake_open), patch.object(m.json,"load",side_effect=replies):
+            result=m.ask("ignored","ignored",[{"role":"user","content":"List files"}],allow_text=True,require_tools=True)
+        self.assertTrue(result["tool_calls"])
+        self.assertEqual(seen[0],seen[1])
+
     def test_custom_model_setup_removed_from_chat(self):
         source=(HERE.parent/"app/src/main/java/com/musabgpt/m4/ChatViewModel.kt").read_text()
         self.assertNotIn("fun configureProvider(",source)

@@ -1,10 +1,10 @@
-# M4 v2 — MusabAI + Arabic Terminal
+# M4 v2 — MusabAI Cursor-style Workbench
 
-A native Android ARM64 app with the user-supplied warm-paper/dark Compose chat design, **one integrated Arabic Terminal** (Alpine Linux + PRoot + PTY), and a bounded AI coding agent. Everything in this repository is authored and built from **Musabgpt/M4**; upstream source repos are only references.
+A native Android ARM64 app with a dark Compose coding workbench, the embedded Arabic Terminal (Alpine Linux + PRoot + PTY), and a bounded AI coding agent. Everything in this repository is authored and built from **Musabgpt/M4**; upstream source repos are only references.
 
 ## One interface, fixed source families
 
-The chat model selector contains **exactly four fixed gateway projects**. There is **no local GGUF/LLM importer**, no custom endpoint form, no manual API key input, no Termux bridge and no old Pi/Ralph plugins.
+The chat model selector contains **exactly four fixed gateway projects**. There is **no local GGUF/LLM importer**, no custom model endpoint form, and no old Pi/Ralph plugins. The optional Termux connector is separate from model routing.
 
 | Source project | M4 integration | Honest availability |
 | --- | --- | --- |
@@ -15,13 +15,24 @@ The chat model selector contains **exactly four fixed gateway projects**. There 
 
 Selecting an unavailable loopback family transparently falls back to FreeLLMPool-approved anonymous routes. The chat shows the *actual route* used; a label in a list is never proof that its server is running. Providers are not guaranteed to be free forever, keyless forever, or to allow unlimited requests. User messages are transmitted to the active external gateway; do not send secrets through public free routes.
 
-## Native coding, not a separate terminal app
+## Cursor-style workbench and runtime
 
-Compose **تنفيذ كود** opens the built-in Arabic Terminal in the same APK. The launcher seeds a real editable offline M4 source checkout at `/root/projects/M4` and invokes the integrated `term-agent`; existing files are preserved. The agent understands the fixed selected source family and uses bounded tool-calling HTTP requests. Its **real seven tools** are `list_files`, `read_file`, `search_code`, `git_status`, `write_file`, approval-gated `run_command` and independently checked `finish`. It uses SQLite events, NewAl's verified continuity/checkpoint modules, backups, test checks and bounded resume.
+The launcher opens Explorer inside a persistent workbench frame. The activity rail
+opens Agent, GitHub, the embedded terminal, Extensions and Preview. The command
+navigator also opens GitLab, scheduled tasks and optional Termux. The editor has
+multiple buffers and review-before-save; Ask Agent includes the current buffer.
+`!command` submits an explicit manual command and **تنفيذ كود** starts the coding
+agent in its own PTY session. `/cursor` opens Explorer.
 
-The system prompt in `agent/system_prompt.md` is an original M4-specific adaptation of the publicly archived [Claude Code Opus 5.5 reference](https://github.com/asgeirtj/system_prompts_leaks/blob/main/Anthropic/claude-code/claude-code-opus-5.5.md), rewritten for real M4 tools and its mobile limitations, **not copied verbatim**. The model is a remote free route chosen at execution time, **not Claude Opus 5.5**, and a prompt alone does not upgrade reasoning capability.
+GitHub uses the existing Device Flow and GitLab uses an HTTPS Personal Access Token stored in Android Keystore. Read operations are exposed to the agent as native tools; issue, merge-request, pipeline and push operations pass through the approval broker and produce a result receipt. No token is sent to the model.
 
-Free chat may work without a key when one keyless provider is available. Coding automation needs a model that correctly supports tool calls; when none does, the task remains blocked, never falsely marked complete. Invoking native shell commands can alter or delete project files, and is **not a hardened sandbox**. Android may stop background processes: state is persisted, but indefinite execution is not guaranteed.
+The embedded terminal is the default execution surface. Termux is an optional connector exposed by one button in the workbench and Tools panel; when Termux is absent M4 continues to work normally. Termux commands use the official `RUN_COMMAND` result callback, a bounded working directory and a saved receipt rather than treating dispatch alone as success.
+
+The APK seeds a real editable offline M4 checkout at `/root/projects/M4` and preserves existing projects. The agent loads the supplied M4 runtime V2 prompt with its live registry, environment and project memory. It provides exact atomic file editing, strict schemas, Todo state, bounded foreground/background processes, incremental output/cancellation, backups, independent Finish checks and exclusive project ownership. Native calls and valid complete prompted JSON envelopes share the same permission checks. Models which provide neither remain blocked.
+
+Actual generated text, JSON, Python, shell and ZIP files are validated and published as persistent chat cards. Arabic PDF uses the authenticated Android renderer when the bridge is live. Cards offer safe preview, open, system-picker save and temporary-URI sharing. The Tasks panel creates approved once/hourly/daily WorkManager jobs with SQLite locks, real outputs and Markdown reports. Android may defer background work; times are expected windows. Live tool events retain their owner conversation.
+
+The host integration has passed agent, Kotlin/Java and APK CI on the first implementation commit. Physical-device PDF/PTY/restart/scheduling behavior still requires acceptance. GitLab, optional Termux, phone/browser agent automation, skills/MCP/hooks and the full interactive approval/steering roadmap are implemented to the bounded native surface described above and still need device acceptance. The prompt alone does not register those capabilities or guarantee model quality. Authorized interpreters are not a hardened process sandbox.
 
 ## Android build and update signing
 
@@ -43,3 +54,51 @@ The earlier NewAl-Cloud baseline package `dev.newal.code.lite` and standalone M4
 CI runs Python agent tests, Kotlin/Compose compilation, rootfs integrity and native build tests, and Android SDK/NDK debug APK construction. A successful CI build is not proof of on-device UX or free-route uptime. APK updates preserve old private files only when Android sees the **exact package and signer** match; M4's Linux runtime upgrades preserve user folders and task history. Signed release builds depend on the original private key, which cannot be retrieved from the public source repository or reconstructed from its certificate fingerprint.
 
 This distribution does not bundle local model weights, require root or ADB, give every gateway unauthorized access, or claim unlimited free service.
+
+## Android workbench interface
+
+The workbench now has a persistent dark frame, an activity rail, command navigation,
+searchable integration cards and file tabs. Open editor buffers survive switching
+between Agent and Explorer and Activity recreation through a ViewModel. Editing
+shows line numbers, a dirty marker and a line comparison before saving; saving
+checks the original content hash and keeps a backup. Ask Agent sends the current
+file buffer, including unsaved edits, with the user's instruction.
+
+This is an Android workbench implementation, not feature parity with Cursor.
+The editor now provides lexical syntax highlighting, local identifier suggestions,
+find, undo/redo and AI whole-file edit proposals with explicit accept/reject. It does
+not yet provide a language server, automatic ghost-text completions or a VS Code extension host. Integration cards open the actual
+native connectors; they do not install arbitrary desktop extensions. Termux is
+optional and its installation still uses Android's normal installation flow.
+
+
+### First launch and mobile editor
+
+Opening M4 now prepares its bundled workspace immediately, with visible progress
+and retry on failure; no chat message or terminal launch is required. The phone
+layout uses a full-width editor and four persistent navigation destinations.
+The WebView is attached only while Preview is selected.
+
+The editor supports creating a file without overwriting existing content, lexical
+syntax colors, local identifier completion, find, undo/redo, and AI editing via
+the selected free gateway. AI proposals are limited to 12,000-character source
+files, reviewed before accepting into the buffer, and saved separately through
+the existing hash check and backup flow. Generation errors never replace a file.
+Gateway availability remains dependent on the selected upstream service.
+
+
+### Conversation and action verification
+
+Agent chat groups observed tool steps under each reply and hides provider-routing
+internals. Markdown renders bold and inline code. Action requests no longer stream
+unvalidated tool-call narration as if it were a completed response. Narrated tool
+calls are repaired and schema-validated before any execution.
+
+HTML/browser requests require an HTML attachment, an observed browser open and a
+DOM observation; a Python attachment is insufficient. YouTube search-and-open
+requests cannot finish on URL dispatch alone. These checks prevent false success;
+they do not bypass site challenges, account access or Android permissions.
+
+AI Complete explicitly proposes an insertion at the editor selection, preserving
+surrounding source and requiring acceptance. It is not automatic ghost text.
+Language-server integration and a VS Code extension host remain unimplemented.

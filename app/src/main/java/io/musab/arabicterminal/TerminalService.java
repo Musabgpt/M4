@@ -37,6 +37,8 @@ public final class TerminalService extends Service {
     private final ArrayList<Session> sessions=new ArrayList<>();
     private final LocalBinder binder=new LocalBinder();
     private Runnable listener;
+    private final ArrayList<Runnable> observers=new ArrayList<>();
+    private com.musabgpt.m4.runtime.M4BridgeServer bridge;
     private Session selected;
     private int sequence=1;
     public final class LocalBinder extends Binder {
@@ -59,6 +61,10 @@ public final class TerminalService extends Service {
         Session(long h,String n,boolean root,boolean linux){
             handle=h;name=n;this.root=root;this.linux=linux;
         }
+        public String getName(){return name;}
+        public boolean isLinux(){return linux;}
+        public boolean isFinished(){return finished;}
+        public TerminalScreen.Frame frame(){return display.frame();}
     }
     @Override public void onCreate(){
         super.onCreate();
@@ -81,7 +87,7 @@ public final class TerminalService extends Service {
         return START_STICKY;
     }
     private void startNotification(){
-        Intent open=new Intent(this,MainActivity.class);
+        Intent open=new Intent(this,com.musabgpt.m4.M4ChatActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent go=PendingIntent.getActivity(this,0,open,
             PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
@@ -114,11 +120,22 @@ public final class TerminalService extends Service {
     public Session selected(){return selected;}
     public void select(Session s){if(sessions.contains(s)){selected=s;inform();}}
     public void setListener(Runnable callback){listener=callback;if(callback!=null)callback.run();}
-    private void inform(){if(listener!=null)listener.run();}
+    public void addListener(Runnable callback){if(!observers.contains(callback))observers.add(callback);callback.run();}
+    public void removeListener(Runnable callback){observers.remove(callback);}
+    private void inform(){
+        if(listener!=null)listener.run();
+        for(Runnable callback:new ArrayList<>(observers))callback.run();
+    }
     public Session create(boolean root,boolean linux,int rows,int cols) throws IOException {
         if(sessions.size()>=6)throw new IOException("الحد الأقصى ست جلسات");
         if(linux && (!LinuxEnvironment.installed(this) || !LinuxEnvironment.runtimeAvailable(this)))
             throw new IOException("بيئة Alpine ليست جاهزة");
+        if(linux && bridge==null){
+            com.musabgpt.m4.runtime.M4BridgeServer candidate=
+                new com.musabgpt.m4.runtime.M4BridgeServer(this);
+            try{candidate.start();bridge=candidate;}
+            catch(Exception failure){candidate.close();}
+        }
         String libdir=getApplicationInfo().nativeLibraryDir;
         long handle=NativePty.start(root,getFilesDir().getAbsolutePath(),
             getCacheDir().getAbsolutePath(),rows,cols,
@@ -230,7 +247,9 @@ public final class TerminalService extends Service {
     }
     @Override public void onDestroy(){
         stopAll();
+        if(bridge!=null){bridge.close();bridge=null;}
         listener=null;
+        observers.clear();
         super.onDestroy();
     }
 }

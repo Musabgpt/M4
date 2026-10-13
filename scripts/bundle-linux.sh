@@ -2,7 +2,10 @@
 set -euo pipefail
 ROOT="$(pwd)"
 ASSET="$ROOT/app/src/main/assets"
-NATIVE="$ROOT/app/src/main/jniLibs/arm64-v8a"
+RUNTIME_ABI="${M4_RUNTIME_ABI:-arm64-v8a}"
+case "$RUNTIME_ABI" in arm64-v8a) M4_ALPINE_ARCH=aarch64 ;; x86_64) M4_ALPINE_ARCH=x86_64 ;; *) exit 2 ;; esac
+export M4_ALPINE_ARCH
+NATIVE="$ROOT/app/src/main/jniLibs/$RUNTIME_ABI"
 mkdir -p "$ASSET" "$NATIVE"
 python3 "$ROOT/scripts/fetch-linux.py" "$ASSET" "$NATIVE"
 test -s "$ASSET/alpine-rootfs.tgz"
@@ -15,21 +18,21 @@ test -s "$NATIVE/libproot-loader.so"
 STAGING="$RUNNER_TEMP/arabic-terminal-alpine"
 mkdir -p "$STAGING"
 tar -xzf "$ASSET/alpine-rootfs.tgz" -C "$STAGING"
-docker run --rm --network host \
+docker run --rm --network host -e M4_ALPINE_ARCH \
   -v "$STAGING:/opt/guest" alpine:3.24 sh -ec '
-    apk --root /opt/guest --arch aarch64 update
-    apk --root /opt/guest --arch aarch64 add --scripts=no --commit-hooks=no \
+    apk --root /opt/guest --arch "$M4_ALPINE_ARCH" update
+    apk --root /opt/guest --arch "$M4_ALPINE_ARCH" add --scripts=no --commit-hooks=no \
         python3 py3-pip git nodejs npm curl ca-certificates-bundle \
         bash coreutils findutils grep sed nano less tmux htop jq ripgrep \
         procps openssh-client zip unzip file py3-pytest
     for optional in github-cli tree-sitter-cli ast-grep; do
-        if apk --root /opt/guest --arch aarch64 add --scripts=no --commit-hooks=no "$optional"; then
+        if apk --root /opt/guest --arch "$M4_ALPINE_ARCH" add --scripts=no --commit-hooks=no "$optional"; then
             echo "Bundled Alpine developer tool: $optional"
         else
             echo "WARNING: optional Alpine developer tool unavailable: $optional" >&2
         fi
     done
-    apk --root /opt/guest --arch aarch64 info -e python3 git nodejs npm bash coreutils nano tmux
+    apk --root /opt/guest --arch "$M4_ALPINE_ARCH" info -e python3 git nodejs npm bash coreutils nano tmux
     test -f /opt/guest/usr/bin/python3 || test -L /opt/guest/usr/bin/python3
     test -f /opt/guest/usr/bin/node || test -L /opt/guest/usr/bin/node
   '
@@ -52,7 +55,9 @@ test -d "$SEED/.git"
 mkdir -p "$STAGING/opt/term-agent" "$STAGING/usr/local/bin"
 cp "$ROOT/agent/agent.py" "$STAGING/opt/term-agent/agent.py"
 cp -R "$ROOT/agent/newal" "$STAGING/opt/term-agent/newal"
-find "$STAGING/opt/term-agent/newal" -type f -name '*.pyc' -delete
+cp -R "$ROOT/agent/m4core" "$STAGING/opt/term-agent/m4core"
+cp -R "$ROOT/agent/providers.d" "$STAGING/opt/term-agent/providers.d"
+find "$STAGING/opt/term-agent" -type f -name '*.pyc' -delete
 cp "$ROOT/agent/system_prompt.md" "$STAGING/opt/term-agent/system_prompt.md"
 cp "$ROOT/agent/provider_routes.py" "$STAGING/opt/term-agent/provider_routes.py"
 cp "$ROOT/agent/term-agent.sh" "$STAGING/usr/local/bin/term-agent"
@@ -71,10 +76,10 @@ mkdir -p "$LEGACY/etc/apk/keys"
 # Union official Alpine 3.24 rootfs keys with Alpine 3.22 container keys;
 # both are distributed by Alpine, and unknown signatures still fail closed.
 cp "$STAGING/etc/apk/keys/"*.pub "$LEGACY/etc/apk/keys/"
-docker run --rm --network host -v "$LEGACY:/opt/apk-v2" alpine:3.22 sh -ec '
+docker run --rm --network host -e M4_ALPINE_ARCH -v "$LEGACY:/opt/apk-v2" alpine:3.22 sh -ec '
   mkdir -p /opt/apk-v2/etc/apk/keys
   cp /etc/apk/keys/*.pub /opt/apk-v2/etc/apk/keys/
-  apk --root /opt/apk-v2 --arch aarch64 --initdb --no-cache \
+  apk --root /opt/apk-v2 --arch "$M4_ALPINE_ARCH" --initdb --no-cache \
     --repositories-file /dev/null \
     --repository https://dl-cdn.alpinelinux.org/alpine/v3.22/main \
     add apk-tools-static

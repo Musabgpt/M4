@@ -17,9 +17,22 @@ sealed interface ChatEvent {
 }
 
 /** Bounded, keyless streaming router. Never sends API credentials and never follows redirects. */
-object ChatApi {
+open class ChatGateway {
     @Volatile private var connection: HttpURLConnection? = null
     @Volatile private var stopped = false
+
+    private fun readBounded(reader: java.io.Reader, limit: Int): String {
+        val out = StringBuilder()
+        val buffer = CharArray(8192)
+        while (out.length < limit) {
+            val count = reader.read(buffer, 0, minOf(buffer.size, limit - out.length))
+            if (count < 0) break
+            if (count == 0) continue
+            out.append(buffer, 0, count)
+        }
+        require(out.length < limit) { "استجابة البوابة كبيرة جداً" }
+        return out.toString()
+    }
 
     fun stop() {
         stopped = true
@@ -72,7 +85,25 @@ object ChatApi {
                     }
                     var totalChars = 0
                     c.inputStream.bufferedReader().use { reader ->
-                        while (!stopped && totalChars < 100000) {
+                        val contentType = c.contentType.orEmpty().lowercase()
+                        if (!contentType.contains("text/event-stream")) {
+                            // OpenAI-compatible local/free gateways may return one JSON response
+                            // even when stream=true was requested. Accept it without weakening
+                            // the bounded response limit or mixing routes.
+                            val item = JSONObject(readBounded(reader, 2_000_000))
+                            val choice = item.optJSONArray("choices")?.optJSONObject(0)
+                            val message = choice?.optJSONObject("message")
+                            val token = message?.optString("content", "")?.takeIf { it.isNotEmpty() }
+                                ?: choice?.optJSONObject("delta")?.optString("content", "")
+                                ?: choice?.optString("text", "")
+                                ?: ""
+                            if (token.isNotEmpty()) {
+                                emit(ChatEvent.Route(route.name))
+                                emitted = true
+                                totalChars = token.length
+                                emit(ChatEvent.Text(token))
+                            }
+                        } else while (!stopped && totalChars < 100000) {
                             val line = reader.readLine() ?: break
                             if (!line.startsWith("data:")) continue
                             val part = line.substring(5).trim()
@@ -108,3 +139,6 @@ object ChatApi {
         throw IllegalStateException("تعذر الوصول إلى البوابات: " + lastError)
     }.flowOn(Dispatchers.IO)
 }
+
+/** Main chat session; inline editor requests use their own cancellable client. */
+object ChatApi : ChatGateway()

@@ -34,6 +34,7 @@ class TestTermAgent(unittest.TestCase):
 
     def test_read_write_rollback(self):
         (self.root/"test.txt").write_text("old")
+        self.assertEqual(agent.execute(self.root,self.state,"read_file",{"path":"test.txt"},False),"old")
         result=agent.execute(self.root,self.state,"write_file",
                              {"path":"test.txt","content":"new"},False)
         self.assertIn("Wrote",result)
