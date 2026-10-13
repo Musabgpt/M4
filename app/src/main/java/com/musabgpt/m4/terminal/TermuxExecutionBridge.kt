@@ -29,7 +29,7 @@ object TermuxExecutionBridge {
         catch (_: Exception) {
             val id = settings.optString("bootstrap_id")
             val receipt = if (id.isNotBlank()) runCatching { TermuxClient.output(context, settings.optString("bootstrap_owner"), id) }.getOrNull() else null
-            JSONObject().put("status", if (receipt?.optString("status") in setOf("failed", "blocked")) "failed" else "unavailable")
+            JSONObject().put("status", if (receipt?.optString("status") in setOf("failed", "blocked")) "failed" else if (receipt?.optString("status") == "pending_result" && System.currentTimeMillis() - settings.optLong("started_at") < 900000) "starting" else "unavailable")
                 .put("bootstrap", receipt ?: JSONObject.NULL).put("error", "محرك Termux غير جاهز أو أوقفه أندرويد؛ استخدم تفعيل المحرك")
         }
     }
@@ -58,7 +58,7 @@ object TermuxExecutionBridge {
         val result = TermuxClient.runApproved(context, JSONObject().put("executable", "bash")
             .put("arguments", JSONArray().put("-lc").put(command)).put("cwd", HOME).put("timeout", 1), owner)
         if (result.optString("command_id").isBlank()) { grants.remove(owner); return result }
-        settings.put("bootstrap_id", result.getString("command_id")).put("bootstrap_owner", owner)
+        settings.put("started_at", System.currentTimeMillis()).put("bootstrap_id", result.getString("command_id")).put("bootstrap_owner", owner)
         val temp = File(context.filesDir, ".termux-engine.tmp"); temp.writeText(settings.toString()); check(temp.renameTo(configFile(context)))
         return JSONObject().put("status", "starting").put("command_id", result.getString("command_id"))
             .put("message", "بدأ تجهيز Termux؛ تحقق عبر TermuxStatus قبل التنفيذ. الإرسال وحده ليس نجاحًا.")

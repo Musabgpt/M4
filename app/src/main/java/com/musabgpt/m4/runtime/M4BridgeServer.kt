@@ -86,6 +86,7 @@ class M4BridgeServer(private val context: Context) : Closeable {
                     .put("screenshot", UiControlService.current() != null && android.os.Build.VERSION.SDK_INT >= 30)
                     .put("permission_broker", true).put("sdk", android.os.Build.VERSION.SDK_INT)
                     .put("browser", com.musabgpt.m4.browser.BrowserController.current != null).put("termux", com.musabgpt.m4.terminal.TermuxClient.status(context))
+                    .put("termux_engine", com.musabgpt.m4.terminal.TermuxExecutionBridge.status(context, owner))
                     .put("github_client", true).put("github", com.musabgpt.m4.github.GitHubClient(context).status())
                     .put("gitlab_client", true).put("gitlab", com.musabgpt.m4.github.GitLabClient(context).status())
                 "artifact_pdf" -> ArtifactRepository.createPdf(context, arguments)

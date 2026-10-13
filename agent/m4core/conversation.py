@@ -177,12 +177,22 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
             result.update(status="blocked", content=str(error)[:3000])
         return result
     repetitions = {}
+    termux_sessions, termux_failures = {}, {}
     breaker, change = Breaker(), 0
     def proof_missing():
+        latest_sessions = {}
+        for entry in result["tools"]:
+            value = entry.get("result")
+            if isinstance(value, dict) and value.get("session_id"):
+                latest_sessions[value["session_id"]] = value
+        if not server_expected and any(value.get("status") == "running" for value in latest_sessions.values()):
+            return "ما زالت جلسة تنفيذ تعمل. اقرأ read_output حتى يظهر exit_code؛ بدء الأمر ليس اكتماله."
         missing = missing_goal_evidence(goal, result["tools"], result["artifacts"])
         if missing: return missing
-        if file_expected and not result["artifacts"]: return "لم تُنشأ مرفقات حقيقية تثبت طلب الملف"
-        if test_expected and not any(x['ok'] and x['name'] in {'PhoneTestLab','BrowserTestLab','Verify','Bash','run_command'} for x in result['tools']): return 'لم يُنفذ اختبار فعلي'
+        termux_written = any(x["ok"] and (x["name"] in {"TermuxWriteFile", "TermuxEditFile", "apply_patch"}) for x in result["tools"])
+        attachment_requested = bool(re.search(r"ارفق|مرفق|attach", normalized_goal))
+        if file_expected and not result["artifacts"] and (attachment_requested or not termux_written): return "لم تُنشأ مرفقات حقيقية تثبت طلب الملف"
+        if test_expected and not any(x['ok'] and x['name'] in {'PhoneTestLab','BrowserTestLab','Verify','Bash','run_command','exec_command','read_output','write_stdin'} for x in result['tools']): return 'لم يُنفذ اختبار فعلي'
         if execution_expected and not any(x["ok"] and x["name"] in {"Bash", "run_command", "PhoneTestLab", "BrowserTestLab", "BrowserOpenArtifact", "Verify", "TerminalExec", "TermuxRun", "exec_command", "read_output", "write_stdin"} for x in result["tools"]): return "لم تُسجل نتيجة تشغيل أو اختبار فعلي"
         if server_expected and not any(x['ok'] and x['name'] in {'WebFetch','BrowserOpen','BrowserTestLab'} for x in result['tools']): return 'شُغل أمر الخادم دون تحقق HTTP؛ لا يوجد دليل أنه جاهز'
         return ""
@@ -258,7 +268,17 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
                     runtime.last_hook_error = ""; errors += 1
                 value = observed(output)
                 ok = succeeded(value)
-                note = breaker.record(breaker.key(change, name, arguments), not ok, name, output)
+                pending = isinstance(value, dict) and value.get("status") in {"running", "starting", "pending_result"}
+                if pending and name in {"read_output", "TermuxStatus", "TermuxOutput"}: repetitions[signature] = 0
+                note = "" if pending else breaker.record(breaker.key(change, name, arguments), not ok, name, output)
+                command_key = None
+                if isinstance(value, dict) and name in {"exec_command", "read_output", "write_stdin"}:
+                    if name == "exec_command" and value.get("session_id"):
+                        termux_sessions[value["session_id"]] = json.dumps([arguments.get("workdir", "."), arguments["command"]])
+                    command_key = termux_sessions.get(value.get("session_id"))
+                    if ok and command_key:
+                        errors -= termux_failures.pop(command_key, 0)
+                if ok and name in {"TermuxWriteFile", "TermuxEditFile", "apply_patch"}: change += 1
                 if note:
                     host.log(db, "notice", {"turn_id": request["turn_id"], "text": note})
                     output += note
@@ -267,16 +287,17 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
                 bounded_value = value
                 serialized = json.dumps(value, ensure_ascii=False)
                 if len(serialized) > 14000:
-                    bounded_value = {"preview": serialized[:14000], "truncated": True}
-                    if isinstance(value, dict): bounded_value.update({k: value[k] for k in ("status", "exit_code", "artifact_id", "sha256", "backend") if k in value})
+                    bounded_value = {"preview": serialized[:8000], "truncated": True}
+                    if isinstance(value, dict): bounded_value.update({k: value[k] for k in ("status", "exit_code", "artifact_id", "sha256", "backend", "session_id", "next_cursor", "has_more") if k in value})
                 result["tools"].append({"name": name, "ok": bool(ok), "result": bounded_value})
                 host.log(db, "tool_finished", {"turn_id": request["turn_id"], "call_id": item["id"], "tool": name, "args": safe_args, "result": output, "ok": bool(ok)})
-                dialog.append({"role": "tool", "tool_call_id": item["id"], "content": output[:12000]})
-                if not ok:
+                dialog.append({"role": "tool", "tool_call_id": item["id"], "content": json.dumps(bounded_value, ensure_ascii=False) if len(output) > 12000 else output})
+                if not ok and not pending:
                     errors += 1
+                    if command_key: termux_failures[command_key] = termux_failures.get(command_key, 0) + 1
                     if runtime.memory:
                         runtime.memory.episode("failure", request["owner_session_id"], goal, error=output, evidence=name)
-                elif runtime.registry.metadata.get(name, {}).get("risk_level") != "read" and name not in {"TodoWrite", "Finish", "finish", "Task"}:
+                elif ok and (runtime.registry.metadata.get(name, {}).get("risk_level") != "read" or command_key or name == "read_output") and name not in {"TodoWrite", "Finish", "finish", "Task"}:
                     successful_actions += 1
                 # Every generated supported file is attached, even when the model
                 # chose Write/Edit rather than the ArtifactCreate tool.

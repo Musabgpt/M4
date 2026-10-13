@@ -40,6 +40,45 @@ class NormalChatRuntimeTests(unittest.TestCase):
         with patch.object(agent, "ask", side_effect=replies), contextlib.redirect_stdout(io.StringIO()):
             return entry(self.root, self.state, request, approved=True, permission_mode=mode, max_steps=8)
 
+    def test_termux_pending_poll_and_repaired_test_can_complete(self):
+        from m4core.bridge import AndroidBridge
+        responses = iter([
+            {"status":"running","session_id":"first","exit_code":None,"stdout":"","next_cursor":0},
+            {"status":"completed","session_id":"first","exit_code":1,"stdout":"failed test","next_cursor":1},
+            {"content":[{"type":"text","text":"written"}]},
+            {"status":"running","session_id":"second","exit_code":None,"stdout":"","next_cursor":0},
+            {"status":"completed","session_id":"second","exit_code":0,"stdout":"tests passed","next_cursor":1},
+        ])
+        def bridge(instance, action, arguments=None):
+            if action == "capabilities": return {"phone":True,"permission_broker":True}
+            if action == "termux_engine": return next(responses)
+            if action == "approve": return {"approved":True}
+            return {}
+        with patch.object(AndroidBridge, "request", bridge):
+            result = self.run_turn([{"role":"user","content":"Run the tests in Termux and fix failures"}], [
+                call("exec_command", {"command":"python -m unittest"}),
+                call("read_output", {"session_id":"first"}),
+                call("TermuxWriteFile", {"path":"main.py","content":"fixed"}),
+                call("exec_command", {"command":"python -m unittest"}),
+                call("read_output", {"session_id":"second"}),
+                call("Finish", {"summary":"Tests passed after repair"}),
+            ])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(any(not row["ok"] and row["result"].get("exit_code") == 1 for row in result["tools"] if isinstance(row["result"],dict)))
+
+    def test_running_termux_command_cannot_be_reported_finished(self):
+        from m4core.bridge import AndroidBridge
+        def bridge(instance, action, arguments=None):
+            if action == "capabilities": return {"phone":True,"permission_broker":True}
+            if action == "termux_engine": return {"status":"running","session_id":"still-running","exit_code":None}
+            return {"approved":True}
+        with patch.object(AndroidBridge, "request", bridge):
+            result = self.run_turn([{"role":"user","content":"Run the tests in Termux"}], [
+                call("exec_command", {"command":"python -m unittest"}),
+                call("Finish", {"summary":"Done"}), call("Finish", {"summary":"Done"})])
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("read_output", result["content"])
+
     def test_normal_chat_uses_previous_code_and_publishes_real_html(self):
         html = '<!doctype html><html lang="ar" dir="rtl"><p>بمادا</p></html>'
         messages = [{"role": "assistant", "content": "```html\n" + html + "\n```"},

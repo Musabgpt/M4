@@ -498,7 +498,9 @@ class ToolRuntime:
         return self.bridge.request("schedule_create", dict(args, owner_session_id=os.environ.get("M4_OWNER_SESSION", "terminal")))
 
     def termux_action(self, action, args, mutation=False):
-        self._permission(mutation=mutation, execution=mutation)
+        # The Android host owns the explicit Termux conversation grant. Do not
+        # demand a second, unrelated Alpine execution approval for every step.
+        if self.mode == "plan_only" and mutation: raise ValueError("Plan mode is read-only")
         return self.bridge.request("termux_engine", dict(args, action=action))
 
     def android_action(self, channel, args, mutation):

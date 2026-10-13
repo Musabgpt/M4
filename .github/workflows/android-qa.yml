@@ -2,13 +2,19 @@ name: M4 — Android runtime evidence
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      termux_engine:
+        description: Test official Termux RUN_COMMAND, PTY and Filesystem MCP on Android
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
+      M4_TEST_TERMUX_ENGINE: ${{ inputs.termux_engine || false }}
       M4_TEST_ABIS: x86_64
       M4_RUNTIME_ABI: x86_64
     steps:

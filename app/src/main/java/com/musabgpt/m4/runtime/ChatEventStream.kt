@@ -94,12 +94,13 @@ object ChatEventStream {
 
 @Composable
 fun InteractiveToolCard(event: RuntimeEvent) {
+    val pendingResult = runCatching { JSONObject(event.result).optString("status") in setOf("running", "starting", "pending_result") }.getOrDefault(false)
     var expanded by remember(event.id) { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(8.dp)) {
             TextButton(onClick = { expanded = !expanded }) {
                 Text((if (expanded) "▾ " else "▸ ") + (event.tool.ifBlank { event.kind }) +
-                    (when (event.ok) { true -> " ✓"; false -> " ✗"; null -> if (event.kind == "tool_started") " ⏳" else "" }) + " • #${event.id}")
+                    (if (pendingResult) " ⏳" else when (event.ok) { true -> " ✓"; false -> " ✗"; null -> if (event.kind == "tool_started") " ⏳" else "" }) + " • #${event.id}")
             }
             if (expanded) {
                 if (event.arguments.isNotBlank()) Text(event.arguments, style = MaterialTheme.typography.labelSmall)

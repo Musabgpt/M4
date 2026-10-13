@@ -43,9 +43,32 @@ fun TermuxPanel(owner: String, autoSetup: Boolean = false) {
             var attempts = 0
             do {
                 delay(2000); refresh(); attempts++
-            } while (status.optString("status") == "unavailable" && attempts < 300)
+            } while (status.optString("status") in setOf("unavailable", "starting") && attempts < 300)
         } else refresh()
         if (status.optString("status") == "failed") output = status.optJSONObject("bootstrap")?.toString(2).orEmpty()
+    }
+    LaunchedEffect(owner, loginSession) {
+        val session = loginSession ?: return@LaunchedEffect
+        try {
+            while (loginSession == session) {
+                delay(1500)
+                if (busy) continue
+                val row = withContext(Dispatchers.IO) { TermuxExecutionBridge.call(context, owner, "read_output",
+                    JSONObject().put("session_id", session).put("cursor", cursor).put("yield_time_ms", 0)) }
+                cursor = maxOf(cursor, row.optInt("next_cursor", cursor))
+                output += row.optString("stdout") + row.optString("stderr")
+                if (!row.isNull("exit_code")) {
+                    if (row.optInt("exit_code") == 0) {
+                        val verified = withContext(Dispatchers.IO) { TermuxExecutionBridge.call(context, owner, "exec_command",
+                            JSONObject().put("command", "gh auth status --hostname github.com && gh auth setup-git").put("yield_time_ms", 10000)) }
+                        output += "\n" + verified.optString("stdout") + verified.optString("stderr")
+                        if (verified.isNull("exit_code")) output += "\nما زال إعداد Git قيد التنفيذ: ${verified.optString("session_id")}"
+                    }
+                    loginSession = null
+                }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (failure: Exception) { output += "\n" + failure.message; loginSession = null }
     }
     LaunchedEffect(owner) { refresh(); if (autoSetup) setup() }
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
