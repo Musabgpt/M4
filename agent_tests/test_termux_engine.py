@@ -23,17 +23,26 @@ class TermuxEngineTests(unittest.TestCase):
     def tearDown(self):
         self.engine.close(); self.folder.cleanup()
     def call(self, action, **args): return self.engine.call('owner',action,args)
+    def poll(self, row, predicate):
+        deadline=time.monotonic()+10
+        while not predicate(row) and time.monotonic()<deadline:
+            row=self.call('read_output',session_id=row['session_id'],yield_time_ms=100)
+        self.assertTrue(predicate(row), row)
+        return row
     def test_real_exit_and_separate_streams(self):
         row=self.call('exec_command',command='printf hello; printf problem >&2; exit 7',yield_time_ms=1000)
+        row=self.poll(row,lambda r:r['exit_code'] is not None)
         self.assertEqual((row['exit_code'],row['stdout'],row['stderr']),(7,'hello','problem'))
     def test_persistent_input_and_incremental_output(self):
         row=self.call('exec_command',command='printf ready; read value; printf "got:%s" "$value"',yield_time_ms=100)
+        row=self.poll(row,lambda r:'ready' in r['stdout'])
         self.assertIsNone(row['exit_code']); self.assertEqual(row['stdout'],'ready')
         final=self.call('write_stdin',session_id=row['session_id'],chars='M4\n',cursor=row['next_cursor'],yield_time_ms=1000)
         self.assertEqual(final['exit_code'],0); self.assertEqual(final['stdout'],'got:M4')
         self.assertEqual(self.call('read_output',session_id=row['session_id'],cursor=final['next_cursor'])['stdout'],'')
     def test_pty_and_ctrl_c(self):
         row=self.call('exec_command',command='test -t 0 && printf pty-ready; exec sleep 60',tty=True,yield_time_ms=300)
+        row=self.poll(row,lambda r:'pty-ready' in r['stdout'])
         self.assertIn('pty-ready',row['stdout'])
         final=self.call('write_stdin',session_id=row['session_id'],chars='\x03',yield_time_ms=1000)
         self.assertIsNotNone(final['exit_code']); self.assertNotEqual(final['exit_code'],0)
@@ -56,6 +65,7 @@ class TermuxEngineTests(unittest.TestCase):
         self.assertEqual(target.read_text(),'after\n')
     def test_output_budget_preserves_cursor(self):
         row=self.call('exec_command',command="python3 -c 'print(\"x\" * 90000)'",yield_time_ms=1000)
+        row=self.poll(row,lambda r:r['exit_code'] is not None)
         self.assertTrue(row['has_more']); self.assertLessEqual(len(row['stdout']),64000)
         tail=self.call('read_output',session_id=row['session_id'],cursor=row['next_cursor'])
         self.assertEqual(len(row['stdout']+tail['stdout']),90001)

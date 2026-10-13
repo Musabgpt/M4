@@ -10,12 +10,12 @@ class Session:
         if tty:
             master, slave = pty.openpty()
             try:
-                self.process = subprocess.Popen([sys.executable,'-c',"import fcntl,termios,os,sys; fcntl.ioctl(0,termios.TIOCSCTTY,0); os.execvp('bash',['bash','-lc',sys.argv[1]])",command], cwd=cwd, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+                self.process = subprocess.Popen([sys.executable,'-c',"import fcntl,termios,os,sys; fcntl.ioctl(0,termios.TIOCSCTTY,0); os.execvp('bash',['bash','-c',sys.argv[1]])",command], cwd=cwd, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
             finally: os.close(slave)
             self.input = os.fdopen(os.dup(master),'wb',buffering=0)
             self.readers = [self.reader(os.fdopen(master,'rb',buffering=0),'stdout')]
         else:
-            self.process = subprocess.Popen(['bash','-lc',command],cwd=cwd,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+            self.process = subprocess.Popen(['bash','-c',command],cwd=cwd,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
             self.input = self.process.stdin
             self.readers = [self.reader(self.process.stdout,'stdout'),self.reader(self.process.stderr,'stderr')]
     def append(self, channel, value):

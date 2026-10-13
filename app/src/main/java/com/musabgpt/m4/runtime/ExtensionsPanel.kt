@@ -16,6 +16,7 @@ private val integrations = listOf(
     Integration("GitHub", "Git + gh + API: repositories, pull requests and Actions through the agent engine", "termux-github"),
     Integration("GitLab", "Projects, merge requests and pipelines", "gitlab"),
     Integration("Termux", "Background agent execution, persistent sessions, GitHub CLI and Filesystem MCP", "termux"),
+    Integration("Filesystem MCP", "Official file tools scoped to Termux projects: read, write, edit, search and move", "termux-filesystem"),
     Integration("MCP, Skills & Hooks", "Connect tool servers and configure agent capabilities", "tool-settings"),
     Integration("Browser", "Preview and browse from the workspace", "browser"),
     Integration("Tasks", "Schedule and inspect background tasks", "tasks")
@@ -45,20 +46,21 @@ fun ExtensionsPanel(open: (String) -> Unit) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(integration.name, style = MaterialTheme.typography.titleMedium)
                         Text(integration.description, style = MaterialTheme.typography.bodySmall)
-                        val missingTermux = integration.destination == "termux" && !termuxInstalled
+                        val missingTermux = integration.destination in setOf("termux", "termux-github", "termux-filesystem") && !termuxInstalled
                         val connectGithub = integration.destination == "github" && !github.optBoolean("connected")
                         Text(when {
                             missingTermux -> "غير مثبت"
                             integration.destination == "github" -> if (github.optBoolean("connected")) "متصل: ${github.optString("login")}" else "جاهز للربط"
+                            integration.destination in setOf("termux-github", "termux-filesystem") -> "عبر محرك Termux"
                             else -> "مدمج"
                         }, style = MaterialTheme.typography.labelSmall)
                         Button(onClick = {
                             if (missingTermux) runCatching {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/com.termux/")))
                             }.onFailure { error = it.message.orEmpty() }
-                            else if (integration.destination in setOf("termux", "termux-github")) open("termux-setup")
+                            else if (integration.destination in setOf("termux", "termux-github", "termux-filesystem")) open("termux-setup")
                             else open(if (connectGithub) "github-connect" else integration.destination)
-                        }) { Text(when { missingTermux -> "تثبيت"; connectGithub -> "ربط الحساب"; integration.destination in setOf("termux", "termux-github") -> "تفعيل المحرك"; else -> "فتح" }) }
+                        }) { Text(when { missingTermux -> "تثبيت"; connectGithub -> "ربط الحساب"; integration.destination in setOf("termux", "termux-github", "termux-filesystem") -> "تفعيل المحرك"; else -> "فتح" }) }
 
                     }
                 }

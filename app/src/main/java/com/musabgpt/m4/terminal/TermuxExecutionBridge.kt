@@ -15,7 +15,7 @@ import java.util.UUID
 /** Authenticated RPC to a Termux-owned process, bootstrapped through RUN_COMMAND. */
 object TermuxExecutionBridge {
     const val ROOT = "/data/data/com.termux/files/home/projects"
-    private const val HOME = "/data/data/com.termux/files/home"
+    private const val TERMUX_HOME = "/data/data/com.termux/files/home"
     private val grants = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private fun configFile(context: Context) = File(context.filesDir, "termux-engine.json")
     private fun config(context: Context) = runCatching { JSONObject(configFile(context).readText()) }.getOrNull()
@@ -44,19 +44,19 @@ object TermuxExecutionBridge {
         if (status(context, owner).optString("status") == "ready") return status(context, owner)
         val port = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { it.localPort }
         val settings = JSONObject().put("port", port).put("token", UUID.randomUUID().toString() + UUID.randomUUID())
-            .put("root", ROOT).put("mcp_command", JSONArray().put("node").put("$HOME/.m4-engine/tools/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js"))
+            .put("root", ROOT).put("mcp_command", JSONArray().put("node").put("$TERMUX_HOME/.m4-engine/tools/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js"))
         fun encode(bytes: ByteArray) = Base64.encodeToString(bytes, Base64.NO_WRAP)
         val source = context.assets.open("termux_engine.py").use { encode(it.readBytes()) }
         val encodedConfig = encode(settings.toString().toByteArray())
         // Only fixed paths and base64 are interpolated; model input is never shell code here.
         val command = "set -e; umask 077; pkg install -y python git gh nodejs-lts; " +
-            "mkdir -p '$HOME/.m4-engine' '$ROOT'; " +
-            "printf '%s' '$source' | base64 -d > '$HOME/.m4-engine/engine.py'; " +
-            "printf '%s' '$encodedConfig' | base64 -d > '$HOME/.m4-engine/config.json'; " +
-            "npm install --prefix '$HOME/.m4-engine/tools' --no-audit --no-fund @modelcontextprotocol/server-filesystem@1.0.0; " +
-            "exec python '$HOME/.m4-engine/engine.py' --config '$HOME/.m4-engine/config.json'"
+            "mkdir -p '$TERMUX_HOME/.m4-engine' '$ROOT'; " +
+            "printf '%s' '$source' | base64 -d > '$TERMUX_HOME/.m4-engine/engine.py'; " +
+            "printf '%s' '$encodedConfig' | base64 -d > '$TERMUX_HOME/.m4-engine/config.json'; " +
+            "npm install --prefix '$TERMUX_HOME/.m4-engine/tools' --no-audit --no-fund @modelcontextprotocol/server-filesystem@1.0.0; " +
+            "exec python '$TERMUX_HOME/.m4-engine/engine.py' --config '$TERMUX_HOME/.m4-engine/config.json'"
         val result = TermuxClient.runApproved(context, JSONObject().put("executable", "bash")
-            .put("arguments", JSONArray().put("-lc").put(command)).put("cwd", HOME).put("timeout", 1), owner)
+            .put("arguments", JSONArray().put("-lc").put(command)).put("cwd", TERMUX_HOME).put("timeout", 1), owner)
         if (result.optString("command_id").isBlank()) { grants.remove(owner); return result }
         settings.put("started_at", System.currentTimeMillis()).put("bootstrap_id", result.getString("command_id")).put("bootstrap_owner", owner)
         val temp = File(context.filesDir, ".termux-engine.tmp"); temp.writeText(settings.toString()); check(temp.renameTo(configFile(context)))

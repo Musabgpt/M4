@@ -33,6 +33,14 @@ class TermuxEngineInstrumentedTest {
             }
         }.apply { isDaemon = true; start() }
         fun call(action: String, args: JSONObject = JSONObject()) = TermuxExecutionBridge.call(context, owner, action, args)
+        fun poll(initial: JSONObject, predicate: (JSONObject) -> Boolean): JSONObject {
+            var row = initial
+            val end = System.nanoTime() + 30_000_000_000L
+            while (!predicate(row) && System.nanoTime() < end) {
+                row = call("read_output", JSONObject().put("session_id", row.getString("session_id")).put("yield_time_ms", 500))
+            }
+            assertTrue(row.toString(), predicate(row)); return row
+        }
         try {
             val starting = TermuxExecutionBridge.setup(context, owner)
             assertTrue(starting.toString(), starting.optString("status") in setOf("starting", "ready"))
@@ -44,12 +52,14 @@ class TermuxEngineInstrumentedTest {
                 Thread.sleep(1500)
             } while (System.nanoTime() < deadline)
             assertEquals(observed.toString(), "ready", observed.optString("status"))
-            val first = call("exec_command", JSONObject().put("command", "printf ready; read answer; printf 'reply:%s' \"\$answer\"; printf warning >&2; exit 7").put("yield_time_ms", 1000))
+            var first = call("exec_command", JSONObject().put("command", "printf ready; read answer; printf 'reply:%s' \"\$answer\"; printf warning >&2; exit 7").put("yield_time_ms", 1000))
+            first = poll(first) { it.optString("stdout").contains("ready") }
             assertTrue(first.toString(), first.isNull("exit_code"))
             val finished = call("write_stdin", JSONObject().put("session_id", first.getString("session_id")).put("chars", "M4\n").put("cursor", first.getInt("next_cursor")).put("yield_time_ms", 1000))
             assertEquals(finished.toString(), 7, finished.getInt("exit_code"))
             assertEquals("reply:M4", finished.getString("stdout")); assertEquals("warning", finished.getString("stderr"))
-            val pty = call("exec_command", JSONObject().put("command", "test -t 0 && printf pty-ok; exec sleep 60").put("tty", true).put("yield_time_ms", 1000))
+            var pty = call("exec_command", JSONObject().put("command", "test -t 0 && printf pty-ok; exec sleep 60").put("tty", true).put("yield_time_ms", 1000))
+            pty = poll(pty) { it.optString("stdout").contains("pty-ok") }
             assertTrue(pty.toString(), pty.getString("stdout").contains("pty-ok"))
             val stopped = call("terminate_process", JSONObject().put("session_id", pty.getString("session_id")))
             assertFalse(stopped.toString(), stopped.isNull("exit_code"))
@@ -60,7 +70,8 @@ class TermuxEngineInstrumentedTest {
             assertFalse(written.toString(), written.optBoolean("isError"))
             val read = call("filesystem_call", JSONObject().put("name", "read_text_file").put("arguments", JSONObject().put("path", path)))
             assertTrue(read.toString(), read.toString().contains("M4 actual Android MCP"))
-            val versions = call("exec_command", JSONObject().put("command", "git --version && gh --version && node --version").put("yield_time_ms", 1000))
+            var versions = call("exec_command", JSONObject().put("command", "git --version && gh --version && node --version").put("yield_time_ms", 1000))
+            versions = poll(versions) { !it.isNull("exit_code") }
             assertEquals(versions.toString(), 0, versions.getInt("exit_code"))
             assertTrue(versions.getString("stdout").contains("gh version"))
             android.util.Log.i("M4QA", "Official Termux RUN_COMMAND, persistent input, PTY, process stop, git/gh and official Filesystem MCP passed")

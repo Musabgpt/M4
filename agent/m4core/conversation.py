@@ -189,7 +189,7 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
             return "ما زالت جلسة تنفيذ تعمل. اقرأ read_output حتى يظهر exit_code؛ بدء الأمر ليس اكتماله."
         missing = missing_goal_evidence(goal, result["tools"], result["artifacts"])
         if missing: return missing
-        termux_written = any(x["ok"] and (x["name"] in {"TermuxWriteFile", "TermuxEditFile", "apply_patch"}) for x in result["tools"])
+        termux_written = any(x["ok"] and (x["name"] in {"TermuxWriteFile", "apply_patch"}) for x in result["tools"])
         attachment_requested = bool(re.search(r"ارفق|مرفق|attach", normalized_goal))
         if file_expected and not result["artifacts"] and (attachment_requested or not termux_written): return "لم تُنشأ مرفقات حقيقية تثبت طلب الملف"
         if test_expected and not any(x['ok'] and x['name'] in {'PhoneTestLab','BrowserTestLab','Verify','Bash','run_command','exec_command','read_output','write_stdin'} for x in result['tools']): return 'لم يُنفذ اختبار فعلي'
