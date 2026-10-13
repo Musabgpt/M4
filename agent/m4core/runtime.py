@@ -92,7 +92,7 @@ class ToolRuntime:
 
     def _add(self, name, description, handler, properties=None, required=()):
         mutations = {"Write", "Edit", "MultiEdit", "TodoWrite", "ArtifactCreate", "ArtifactBundle", "ArtifactPublish", "ArtifactView", "Rewind", "MemoryWrite", "SkillCreate", "ToolFactory", "ExtensionDisable", "MCPDisconnect", "HooksDisable", "GitBranch", "GitCommit", "SchedulePause", "ScheduleClone"}
-        executions = {"Bash", "KillShell", "run_command", "ScheduleCreate", "ScheduleRun", "ScheduleEnable", "Verify", "MCPConnect", "HookInstall", "GitPush", "TermuxRun"}
+        executions = {"Bash", "KillShell", "run_command", "ScheduleCreate", "ScheduleRun", "ScheduleEnable", "Verify", "MCPConnect", "HookInstall", "GitPush", "TermuxRun", "TermuxSetup", "exec_command", "write_stdin", "terminate_process", "apply_patch", "TermuxFilesystemCall", "TermuxWriteFile", "TermuxEditFile", "TermuxGitHubAPI"}
         risk = "execute" if name in executions else "edit" if name in mutations else "read"
         self.registry.register(tool(name, description, properties, required), handler,
             {"risk_level": risk, "requires_user_consent": risk == "execute"})
@@ -195,6 +195,35 @@ class ToolRuntime:
                        "delay_minutes": schema("integer", minimum=1, maximum=525600), "interval_minutes": schema("integer", minimum=15, maximum=525600),
                        "timezone": S, "trigger": schema("object", properties={"event": S, "condition": S, "percent": schema("integer", minimum=0, maximum=100), "repository": S, "conclusion": S, "month_day": schema("integer", minimum=1, maximum=31)}, additionalProperties=False)}, ("name", "command", "type"))
         if self.capabilities.get("phone"):
+            wait_schema = schema("integer", minimum=0, maximum=10000)
+            cursor_schema = schema("integer", minimum=0)
+            self._add("TermuxSetup", "Enable the optional background Termux agent engine for this conversation; installs Python, Git, gh, Node and official Filesystem MCP. Requires Android permission and initial user authorization. Poll TermuxStatus until ready.",
+                lambda a: self.android_action("termux_engine", {"action":"setup"}, True))
+            self._add("TermuxStatus", "Observe whether the authenticated Termux execution engine is ready and this conversation is authorized.",
+                lambda a: self.bridge.request("termux_engine", {"action":"status"}))
+            self._add("exec_command", "Execute in Termux projects, without opening a terminal window. Returns real stdout, stderr, exit_code and persistent session_id. Null exit_code means still running; use read_output. tty=true provides PTY for interactive prompts and merges stderr into stdout.",
+                lambda a: self.termux_action("exec_command", a, True), {"command":S,"workdir":S,"tty":schema("boolean"),"yield_time_ms":wait_schema}, ("command",))
+            self._add("write_stdin", "Send input to an owned Termux session; use the last next_cursor to read only new output.",
+                lambda a: self.termux_action("write_stdin", a, True), {"session_id":S,"chars":S,"cursor":cursor_schema,"yield_time_ms":wait_schema}, ("session_id","chars"))
+            self._add("read_output", "Read real output and completion of an owned Termux session. A running session is not a successful build.",
+                lambda a: self.termux_action("read_output", a), {"session_id":S,"cursor":cursor_schema,"yield_time_ms":wait_schema}, ("session_id",))
+            self._add("terminate_process", "Terminate the owned Termux process group, including child processes.",
+                lambda a: self.termux_action("terminate_process", a, True), {"session_id":S,"cursor":cursor_schema}, ("session_id",))
+            self._add("apply_patch", "Apply a unified Git diff within the Termux project, with git apply --check before modifying files. Paths are relative to workdir; this is not the *** Begin Patch format.",
+                lambda a: self.termux_action("apply_patch", a, True), {"patch":S,"workdir":S}, ("patch",))
+            self._add("TermuxGitHubAPI", "Call the official GitHub API through authenticated gh in Termux. Tokens remain in Termux. endpoint is relative, e.g. repos/owner/repo/actions/runs. Requires gh auth login once.",
+                lambda a: self.termux_action("github_api", a, a.get("method","GET") != "GET"), {"endpoint":S,"method":schema("string",enum=["GET","POST","PATCH","PUT","DELETE"]),"body":schema("object",additionalProperties=True)}, ("endpoint",))
+            self._add("TermuxFilesystemTools", "Discover actual tools and JSON schemas from the official Filesystem MCP process running over persistent stdio in Termux.",
+                lambda a: self.termux_action("filesystem_tools", a))
+            self._add("TermuxFilesystemCall", "Call an actual discovered Filesystem MCP tool. Relative paths resolve under Termux ~/projects, not the private Alpine checkout.",
+                lambda a: self.termux_action("filesystem_call", a, a["name"] not in {"read_file","read_text_file","read_multiple_files","list_directory","list_directory_with_sizes","directory_tree","search_files","get_file_info","list_allowed_directories"}),
+                {"name":S,"arguments":schema("object",additionalProperties=True)}, ("name","arguments"))
+            self._add("TermuxReadFile", "Read a UTF-8 file through Termux Filesystem MCP.",
+                lambda a: self.termux_action("filesystem_call", {"name":"read_text_file","arguments":a}), {"path":S}, ("path",))
+            self._add("TermuxWriteFile", "Create or replace a file through Termux Filesystem MCP.",
+                lambda a: self.termux_action("filesystem_call", {"name":"write_file","arguments":a}, True), {"path":S,"content":S}, ("path","content"))
+            self._add("TermuxEditFile", "Precisely replace matching text through Termux Filesystem MCP; dryRun produces a diff without writing.",
+                lambda a: self.termux_action("filesystem_call", {"name":"edit_file","arguments":a}, True), {"path":S,"edits":schema("array",items=schema("object",properties={"oldText":S,"newText":S},required=["oldText","newText"],additionalProperties=False)),"dryRun":schema("boolean")}, ("path","edits"))
             self._add("TermuxRun", "Run an explicitly approved optional Termux executable and await the real official result.",
                 lambda a: self.android_action("termux_run", a, True), {"executable": S, "arguments": schema("array", items=S, maxItems=50), "cwd": S, "timeout": schema("integer", minimum=1, maximum=120)}, ("executable",))
             self._add("TermuxOutput", "Read a durable Termux stdout/stderr and exit code receipt belonging to this conversation.",
@@ -467,6 +496,10 @@ class ToolRuntime:
     def schedule(self, args):
         self._permission(execution=True)
         return self.bridge.request("schedule_create", dict(args, owner_session_id=os.environ.get("M4_OWNER_SESSION", "terminal")))
+
+    def termux_action(self, action, args, mutation=False):
+        self._permission(mutation=mutation, execution=mutation)
+        return self.bridge.request("termux_engine", dict(args, action=action))
 
     def android_action(self, channel, args, mutation):
         self._permission(mutation=mutation)

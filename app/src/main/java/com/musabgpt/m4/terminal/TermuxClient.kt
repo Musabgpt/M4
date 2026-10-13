@@ -21,15 +21,17 @@ object TermuxClient {
         return JSONObject().put("installed", installed).put("permission_granted", context.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED)
             .put("external_apps", "unknown_until_command_result").put("backend", "termux")
     }
-    fun run(context: Context, args: JSONObject, owner: String): JSONObject {
+    fun run(context: Context, args: JSONObject, owner: String): JSONObject = runCommand(context, args, owner, false)
+    internal fun runApproved(context: Context, args: JSONObject, owner: String): JSONObject = runCommand(context, args, owner, true)
+    private fun runCommand(context: Context, args: JSONObject, owner: String, approved: Boolean): JSONObject {
         if (!status(context).getBoolean("installed")) return JSONObject().put("status", "unavailable").put("error", "Termux غير مثبت؛ الطرفية المدمجة تعمل بدونه")
         val executable = args.getString("executable")
         require(executable.matches(Regex("[a-zA-Z][a-zA-Z0-9_.-]{0,80}"))) { "اسم برنامج Termux غير صالح" }
         val arguments = args.optJSONArray("arguments") ?: org.json.JSONArray()
-        require(arguments.length() <= 50 && arguments.toString().length <= 12000)
+        require(arguments.length() <= 50 && arguments.toString().length <= (if (approved) 128000 else 12000))
         val cwd = args.optString("cwd", "/data/data/com.termux/files/home")
         require(cwd.startsWith("/data/data/com.termux/files/") && !cwd.split('/').contains(".."))
-        if (!CapabilityBroker.request(owner, "تشغيل داخل Termux", args)) return JSONObject().put("status", "denied").put("error", "رفض المستخدم أمر Termux")
+        if (!approved && !CapabilityBroker.request(owner, "تشغيل داخل Termux", args)) return JSONObject().put("status", "denied").put("error", "رفض المستخدم أمر Termux")
         if (context.checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED && !HostPermissionRequest.request(PERMISSION))
             return JSONObject().put("status", "permission_required").put("needs", PERMISSION).put("error", "لم تمنح صلاحية Termux RUN_COMMAND")
         val id = UUID.randomUUID().toString(); val nonce = UUID.randomUUID().toString()

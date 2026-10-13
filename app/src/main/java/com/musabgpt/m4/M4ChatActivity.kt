@@ -75,8 +75,6 @@ class M4ChatActivity : ComponentActivity() {
                 com.musabgpt.m4.runtime.WorkbenchShell(panel, { panel = it }) {
                     Box(Modifier.fillMaxSize()) {
                         Surface(Modifier.fillMaxSize()) { when (panel) {
-                        "developer-host-install" -> com.musabgpt.m4.runtime.DeveloperHostPanel(autoStart = true)
-                        "developer-host" -> com.musabgpt.m4.runtime.DeveloperHostPanel()
                         "browser" -> BrowserPanel(browser)
                         "cursor" -> com.musabgpt.m4.runtime.FilesPanel(editorState) { prompt -> vm.send(prompt); panel = "chat" }
                         "chat" -> ChatScreen(openTerminal = { panel = "terminal"; terminal.open() },
@@ -85,6 +83,7 @@ class M4ChatActivity : ComponentActivity() {
                                 artifacts = attachments, runtimeEvents = events, executeCommand = { command -> terminal.execute(command); panel = "terminal" }, loadOlderEvents = { eventLimit = (eventLimit + 200).coerceAtMost(5000) }, vm = vm)
                             "terminal" -> TerminalPanel(terminal)
                             "termux" -> TermuxPanel(owner)
+                            "termux-setup" -> TermuxPanel(owner, autoSetup = true)
                             "files" -> FilesPanel(editorState) { prompt -> vm.send(prompt); panel = "chat" }
                             "tasks" -> SchedulerPanel(owner)
                             "github" -> com.musabgpt.m4.github.GitHubPanel(owner)

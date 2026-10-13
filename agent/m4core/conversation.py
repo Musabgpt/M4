@@ -32,6 +32,15 @@ an actual result, open it, and verify its page. On native apps, inspect PhoneScr
 before choosing observed controls and verify the final state. If permissions,
 sign-in or a site challenge prevent a step, report the specific remaining step.
 Tool calls must use structured schemas, never narrated names with JSON examples.
+When the user requests Termux or its engine is enabled, use TermuxStatus then
+exec_command/write_stdin/read_output and Termux filesystem tools. These files
+live in Termux ~/projects, not the private Alpine checkout. Preserve workdir.
+Poll running sessions to a real exit code before reporting test/build success.
+Use git and gh in that same workspace for clone, branches, commits, PRs and
+Actions. gh auth login --web may need a PTY and the user's browser authorization;
+never claim a logged-in account without gh auth status, never expose auth tokens.
+After a failed test, inspect errors, edit, and rerun within the existing task.
+Filesystem MCP uses persistent stdio through the Termux engine, not a terminal UI.
 """
 
 
@@ -99,8 +108,8 @@ def succeeded(value):
     if isinstance(value, str):
         return not value.startswith(("Tool error:", "Execution blocked", "Git error:", "Error:"))
     if isinstance(value, dict):
-        return value.get("exit_code") in {None,0} and not value.get("error") and not value.get("approval_required", False) and value.get("ok", True) and value.get("status") not in {
-            "failed", "blocked", "denied", "canceled", "timed_out", "interrupted", "permission_required", "waiting_permission", "unavailable", "pending_result", "awaiting_android_confirmation", "installer_reported_success"}
+        return value.get("exit_code") in {None,0} and not value.get("error") and not value.get("isError") and not value.get("approval_required", False) and value.get("ok", True) and value.get("status") not in {
+            "running", "starting", "failed", "blocked", "denied", "canceled", "timed_out", "interrupted", "permission_required", "waiting_permission", "unavailable", "pending_result", "awaiting_android_confirmation", "installer_reported_success"}
     return True
 
 
@@ -174,7 +183,7 @@ def run_turn(host, root, state, request, runtime, db, max_steps):
         if missing: return missing
         if file_expected and not result["artifacts"]: return "لم تُنشأ مرفقات حقيقية تثبت طلب الملف"
         if test_expected and not any(x['ok'] and x['name'] in {'PhoneTestLab','BrowserTestLab','Verify','Bash','run_command'} for x in result['tools']): return 'لم يُنفذ اختبار فعلي'
-        if execution_expected and not any(x["ok"] and x["name"] in {"Bash", "run_command", "PhoneTestLab", "BrowserTestLab", "BrowserOpenArtifact", "Verify", "TerminalExec", "TermuxRun"} for x in result["tools"]): return "لم تُسجل نتيجة تشغيل أو اختبار فعلي"
+        if execution_expected and not any(x["ok"] and x["name"] in {"Bash", "run_command", "PhoneTestLab", "BrowserTestLab", "BrowserOpenArtifact", "Verify", "TerminalExec", "TermuxRun", "exec_command", "read_output", "write_stdin"} for x in result["tools"]): return "لم تُسجل نتيجة تشغيل أو اختبار فعلي"
         if server_expected and not any(x['ok'] and x['name'] in {'WebFetch','BrowserOpen','BrowserTestLab'} for x in result['tools']): return 'شُغل أمر الخادم دون تحقق HTTP؛ لا يوجد دليل أنه جاهز'
         return ""
     try:

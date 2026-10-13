@@ -72,6 +72,7 @@ class M4BridgeServer(private val context: Context) : Closeable {
             require(owner.matches(Regex("[A-Za-z0-9-]{1,80}")) && turn.matches(Regex("[A-Za-z0-9-]{1,80}")))
             if (mode == "plan_only") require(when (request.getString("action")) {
                 "capabilities", "artifact_inspect", "termux_output" -> true
+                "termux_engine" -> com.musabgpt.m4.terminal.TermuxExecutionBridge.readOnly(arguments.optString("action"), arguments)
                 "phone" -> arguments.optString("action") in setOf("list_apps", "device", "battery", "screen", "wait_for", "assert_visible")
                 "browser" -> arguments.optString("action") in setOf("read_dom", "wait_for", "assert_visible", "console", "network")
                 "github" -> arguments.optString("action") in setOf("status", "check_connection", "repositories", "runs", "run", "jobs", "job_logs", "artifacts", "pull_requests", "pull_request", "update_status")
@@ -92,6 +93,7 @@ class M4BridgeServer(private val context: Context) : Closeable {
                 "artifact_view" -> ArtifactRepository.view(context, owner, arguments.getString("id"))
                 "schedule_create" -> TaskScheduler.requestApproval(context, arguments)
                 "schedule" -> TaskScheduler.control(context, owner, arguments)
+                "termux_engine" -> com.musabgpt.m4.terminal.TermuxExecutionBridge.call(context, owner, arguments.getString("action"), arguments, mode)
                 "termux_run" -> com.musabgpt.m4.terminal.TermuxClient.run(context, arguments, owner)
                 "termux_output" -> com.musabgpt.m4.terminal.TermuxClient.output(context, owner, arguments.getString("id"))
                 "phone" -> AndroidPhoneTools.dispatch(context, arguments.getString("action"), arguments, owner, turn, mode != "plan_only")

@@ -13,10 +13,9 @@ import androidx.compose.ui.unit.dp
 
 private data class Integration(val name: String, val description: String, val destination: String)
 private val integrations = listOf(
-    Integration("Code-OSS", "Code-OSS editor, Open VSX and language servers • large optional download", "developer-host"),
-    Integration("GitHub", "Repositories, issues, pull requests and Actions", "github"),
+    Integration("GitHub", "Git + gh + API: repositories, pull requests and Actions through the agent engine", "termux-github"),
     Integration("GitLab", "Projects, merge requests and pipelines", "gitlab"),
-    Integration("Termux", "Optional external command runner", "termux"),
+    Integration("Termux", "Background agent execution, persistent sessions, GitHub CLI and Filesystem MCP", "termux"),
     Integration("MCP, Skills & Hooks", "Connect tool servers and configure agent capabilities", "tool-settings"),
     Integration("Browser", "Preview and browse from the workspace", "browser"),
     Integration("Tasks", "Schedule and inspect background tasks", "tasks")
@@ -49,7 +48,6 @@ fun ExtensionsPanel(open: (String) -> Unit) {
                         val missingTermux = integration.destination == "termux" && !termuxInstalled
                         val connectGithub = integration.destination == "github" && !github.optBoolean("connected")
                         Text(when {
-                            integration.destination == "developer-host" -> "محرك اختياري"
                             missingTermux -> "غير مثبت"
                             integration.destination == "github" -> if (github.optBoolean("connected")) "متصل: ${github.optString("login")}" else "جاهز للربط"
                             else -> "مدمج"
@@ -58,9 +56,9 @@ fun ExtensionsPanel(open: (String) -> Unit) {
                             if (missingTermux) runCatching {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/com.termux/")))
                             }.onFailure { error = it.message.orEmpty() }
-                            else if (integration.destination == "developer-host") open("developer-host-install")
+                            else if (integration.destination in setOf("termux", "termux-github")) open("termux-setup")
                             else open(if (connectGithub) "github-connect" else integration.destination)
-                        }) { Text(when { integration.destination == "developer-host" -> "تثبيت وفتح"; missingTermux -> "تثبيت"; connectGithub -> "ربط الحساب"; else -> "فتح" }) }
+                        }) { Text(when { missingTermux -> "تثبيت"; connectGithub -> "ربط الحساب"; integration.destination in setOf("termux", "termux-github") -> "تفعيل المحرك"; else -> "فتح" }) }
 
                     }
                 }

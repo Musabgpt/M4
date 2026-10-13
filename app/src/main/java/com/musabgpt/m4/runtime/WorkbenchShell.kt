@@ -25,7 +25,7 @@ import androidx.compose.material.icons.filled.Code
 private val destinations = listOf(
     "files" to "Explorer", "chat" to "Agent", "github" to "GitHub",
     "gitlab" to "GitLab", "terminal" to "Terminal", "tools" to "Extensions",
-    "developer-host" to "Code-OSS", "browser" to "Preview", "tasks" to "Tasks", "termux" to "Termux"
+    "browser" to "Preview", "tasks" to "Tasks", "termux" to "Termux"
 )
 
 @Composable
@@ -52,7 +52,7 @@ fun WorkbenchShell(panel: String, open: (String) -> Unit, content: @Composable (
                 Surface(color = MaterialTheme.colorScheme.surface) {
                     Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 56.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Code, "M4", tint = MaterialTheme.colorScheme.primary)
-                        Text("  M4 / " + (if (panel == "developer-host-install") "Code-OSS" else destinations.firstOrNull { it.first == panel }?.second ?: "Workspace"), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                        Text("  M4 / " + (destinations.firstOrNull { it.first == panel }?.second ?: "Workspace"), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                         IconButton(onClick = { commands = true }, modifier = Modifier.testTag("workbench-commands")) { Icon(Icons.Default.Search, "Search commands") }
                     }
                 }
